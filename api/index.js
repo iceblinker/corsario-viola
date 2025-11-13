@@ -177,6 +177,26 @@ function getLanguageInfo(title, italianMovieTitle = null) {
     return { icon: isIta ? '🇮🇹 ' : '', isItalian: isIta, isMulti: false };
 }
 
+// ✅ NUOVA FUNZIONE: Detecta Season Pack
+function isSeasonPack(title) {
+    if (!title) return false;
+    const lowerTitle = title.toLowerCase();
+    
+    // Pattern per pack completi/multi-stagione
+    const packPatterns = [
+        /stagion[ei]\s*\d+\s*[-–—]\s*\d+/i,  // Stagione 1-34
+        /season\s*\d+\s*[-–—]\s*\d+/i,       // Season 1-34
+        /s\d+\s*[-–—]\s*s?\d+/i,             // S01-S34
+        /completa/i,                          // Completa
+        /complete/i,                          // Complete
+        /integrale/i,                         // Integrale
+        /collection/i,                        // Collection
+        /\bpack\b/i                          // Pack
+    ];
+    
+    return packPatterns.some(pattern => pattern.test(lowerTitle));
+}
+
 // ✅ NUOVA FUNZIONE: Filtro per categorie per adulti
 function isAdultCategory(categoryText) {
     if (!categoryText) return false;
@@ -225,49 +245,114 @@ async function fetchCorsaroNeroSingle(searchQuery, type = 'movie') {
     console.log(`🏴‍☠️ [Single Query] Searching Il Corsaro Nero for: "${searchQuery}" (type: ${type})`);
 
     try {
-        let searchCategory;
+        let searchCategories = [];
         let outputCategory;
+        
         switch (type) {
             case 'movie':
-                searchCategory = 'film';
+                searchCategories = ['film', 'animazione']; // Film può essere anche in Animazione - Film
                 outputCategory = 'Movies';
                 break;
             case 'series':
-                searchCategory = 'serie-tv';
+                searchCategories = ['serie-tv', 'animazione']; // Serie può essere anche in Animazione - Serie
                 outputCategory = 'TV';
                 break;
             case 'anime':
-                searchCategory = 'anime';
+                searchCategories = ['animazione']; // Anime solo in Animazione
                 outputCategory = 'Anime';
                 break;
             default:
-                searchCategory = 'serie-tv';
+                searchCategories = ['serie-tv', 'animazione'];
                 outputCategory = 'TV';
         }
-        const searchUrl = `${CORSARO_BASE_URL}/search?q=${encodeURIComponent(searchQuery)}&cat=${searchCategory}`;
-        
-        const searchResponse = await fetch(searchUrl, {
-            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' }
-        });
-        if (!searchResponse.ok) {
-            throw new Error(`CorsaroNero search failed with status ${searchResponse.status}`);
-        }
-        const searchHtml = await searchResponse.text();
 
-        const $ = cheerio.load(searchHtml);
-        const rows = $('tbody tr');
+        let allRows = [];
+        let searchHtml = '';
+        let lastSearchUrl = '';
         
-        if (rows.length === 0) {
-            console.log('🏴‍☠️ No results found on CorsaroNero.');
+        // Helper function per determinare se un titolo è una serie o un film
+        const looksLikeSeries = (title) => {
+            const seriesPatterns = [
+                /S\d{1,2}E\d{1,2}/i,           // S01E01
+                /S\d{1,2}\s/i,                  // S01, S1
+                /Season\s*\d+/i,                // Season 1
+                /Stagione\s*\d+/i,              // Stagione 1
+                /\d{1,2}x\d{1,2}/i,            // 1x01
+                /Complete\s*Series/i,           // Complete Series
+                /Serie\s*Completa/i,            // Serie Completa
+                /Stagioni?\s*\d+/i             // Stagione 1, Stagioni 1-5
+            ];
+            return seriesPatterns.some(pattern => pattern.test(title));
+        };
+        
+        // Cerca in tutte le categorie rilevanti
+        for (const searchCategory of searchCategories) {
+            const searchUrl = `${CORSARO_BASE_URL}/search?q=${encodeURIComponent(searchQuery)}&cat=${searchCategory}`;
+            console.log(`🏴‍☠️   Searching in category: ${searchCategory}`);
+            
+            const searchResponse = await fetch(searchUrl, {
+                headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' }
+            });
+            
+            if (!searchResponse.ok) {
+                console.log(`🏴‍☠️   Category ${searchCategory} search failed with status ${searchResponse.status}`);
+                continue;
+            }
+            
+            const categoryHtml = await searchResponse.text();
+            const $cat = cheerio.load(categoryHtml);
+            const rows = $cat('tbody tr');
+            
+            console.log(`🏴‍☠️   Found ${rows.length} results in category: ${searchCategory}`);
+            
+            // Se stiamo cercando una serie, filtra i film dalla categoria animazione
+            if (type === 'series' && searchCategory === 'animazione' && rows.length > 0) {
+                const filteredRows = rows.toArray().filter(row => {
+                    const title = $cat(row).find('th a').text().trim();
+                    const isSeries = looksLikeSeries(title);
+                    if (!isSeries) {
+                        console.log(`🏴‍☠️   Filtering out movie from animation: "${title}"`);
+                    }
+                    return isSeries;
+                });
+                console.log(`🏴‍☠️   After filtering: ${filteredRows.length} series results from animation category`);
+                allRows.push(...filteredRows);
+            } else if (type === 'movie' && searchCategory === 'animazione' && rows.length > 0) {
+                // Se stiamo cercando un film, filtra le serie dalla categoria animazione
+                const filteredRows = rows.toArray().filter(row => {
+                    const title = $cat(row).find('th a').text().trim();
+                    const isSeries = looksLikeSeries(title);
+                    if (isSeries) {
+                        console.log(`🏴‍☠️   Filtering out series from animation: "${title}"`);
+                    }
+                    return !isSeries;
+                });
+                console.log(`🏴‍☠️   After filtering: ${filteredRows.length} movie results from animation category`);
+                allRows.push(...filteredRows);
+            } else {
+                allRows.push(...rows.toArray());
+            }
+            
+            // Salva l'ultimo HTML e URL validi
+            if (rows.length > 0) {
+                searchHtml = categoryHtml;
+                lastSearchUrl = searchUrl;
+            }
+        }
+        
+        if (allRows.length === 0) {
+            console.log('🏴‍☠️ No results found on CorsaroNero in any category.');
             return [];
         }
 
-        console.log(`🏴‍☠️ Found ${rows.length} potential results on CorsaroNero. Fetching details...`);
+        const $ = cheerio.load(searchHtml);
+
+        console.log(`🏴‍☠️ Found ${allRows.length} potential results on CorsaroNero. Fetching details...`);
         // Limit the number of detail pages to fetch to avoid "Too many subrequests" error on Cloudflare.
         const MAX_DETAILS_TO_FETCH = 6;
-        const rowsToProcess = rows.toArray().slice(0, MAX_DETAILS_TO_FETCH);
+        const rowsToProcess = allRows.slice(0, MAX_DETAILS_TO_FETCH);
 
-        console.log(`🏴‍☠️ Found ${rows.length} potential results on CorsaroNero. Fetching details for top ${rowsToProcess.length}...`);
+        console.log(`🏴‍☠️ Found ${allRows.length} potential results on CorsaroNero. Fetching details for top ${rowsToProcess.length}...`);
 
         const streamPromises = rowsToProcess.map(async (row) => {
             const titleElement = $(row).find('th a');
@@ -293,7 +378,7 @@ async function fetchCorsaroNeroSingle(searchQuery, type = 'movie') {
             const torrentPageUrl = `${CORSARO_BASE_URL}${torrentPath}`;
 
             try {
-                const detailResponse = await fetch(torrentPageUrl, { headers: { 'Referer': searchUrl } });
+                const detailResponse = await fetch(torrentPageUrl, { headers: { 'Referer': lastSearchUrl } });
                 if (!detailResponse.ok) return null;
 
                 const detailHtml = await detailResponse.text();
@@ -1877,7 +1962,7 @@ async function fetchUIndexData(searchQuery, type = 'movie', italianTitle = null)
     }
 }
 
-// ✅ Matching functions (unchanged but improved logging)
+// ✅ IMPROVED Matching functions - Supporta SEASON PACKS come Torrentio
 function isExactEpisodeMatch(torrentTitle, showTitleOrTitles, seasonNum, episodeNum, isAnime = false) {
     if (!torrentTitle || !showTitleOrTitles) return false;
     
@@ -1932,7 +2017,8 @@ function isExactEpisodeMatch(torrentTitle, showTitleOrTitles, seasonNum, episode
     const seasonStr = String(seasonNum).padStart(2, '0');
     const episodeStr = String(episodeNum).padStart(2, '0');
     
-    const patterns = [
+    // ✅ NUOVA LOGICA: Cerca prima l'episodio specifico
+    const exactEpisodePatterns = [
         new RegExp(`s${seasonStr}e${episodeStr}`, 'i'),
         new RegExp(`${seasonNum}x${episodeStr}`, 'i'),
         new RegExp(`[^0-9]${seasonNum}${episodeStr}[^0-9]`, 'i'),
@@ -1940,10 +2026,45 @@ function isExactEpisodeMatch(torrentTitle, showTitleOrTitles, seasonNum, episode
         new RegExp(`s${seasonStr}\.?e${episodeStr}`, 'i'),
         new RegExp(`${seasonStr}${episodeStr}`, 'i')
     ];
-        
-    const matches = patterns.some(pattern => pattern.test(normalizedTorrentTitle));
-    console.log(`${matches ? '✅' : '❌'} Episode match for "${torrentTitle}" S${seasonStr}E${episodeStr}`);
-    return matches;
+    
+    const exactMatch = exactEpisodePatterns.some(pattern => pattern.test(normalizedTorrentTitle));
+    if (exactMatch) {
+        console.log(`✅ [EXACT] Episode match for "${torrentTitle}" S${seasonStr}E${episodeStr}`);
+        return true;
+    }
+    
+    // ✅ NUOVA LOGICA: Se non trova l'episodio esatto, cerca SEASON PACK
+    // Es: "Simpson Stagione 27", "Simpson S27", "Simpson Season 27 Complete"
+    const seasonPackPatterns = [
+        // Italiano
+        new RegExp(`stagione\\s*${seasonNum}`, 'i'),
+        new RegExp(`stagione\\s*${seasonStr}`, 'i'),
+        // Inglese
+        new RegExp(`season\\s*${seasonNum}\\b`, 'i'),
+        new RegExp(`season\\s*${seasonStr}\\b`, 'i'),
+        // Formato compatto
+        new RegExp(`\\bs${seasonStr}\\b(?!e)`, 'i'), // S27 ma non S27E
+        new RegExp(`\\bs${seasonNum}\\b(?!e)`, 'i'), // S27 ma non S27E
+        // Multi-stagione che include questa stagione
+        // Es: "Stagione 1-34", "Season 1-27", "S01-S27"
+        new RegExp(`stagion[ei]\\s*\\d+\\s*[-–—]\\s*\\d*${seasonNum}`, 'i'),
+        new RegExp(`season\\s*\\d+\\s*[-–—]\\s*\\d*${seasonNum}`, 'i'),
+        new RegExp(`s\\d+\\s*[-–—]\\s*s?${seasonStr}`, 'i'),
+        new RegExp(`stagion[ei]\\s*${seasonNum}\\s*[-–—]`, 'i'), // Stagione 27-XX
+        new RegExp(`season\\s*${seasonNum}\\s*[-–—]`, 'i'), // Season 27-XX
+        // Complete pack
+        new RegExp(`s${seasonStr}.*(?:completa|complete|full)`, 'i'),
+        new RegExp(`(?:completa|complete|full).*s${seasonStr}`, 'i')
+    ];
+    
+    const seasonPackMatch = seasonPackPatterns.some(pattern => pattern.test(normalizedTorrentTitle));
+    if (seasonPackMatch) {
+        console.log(`✅ [SEASON PACK] Match for "${torrentTitle}" contains Season ${seasonNum}`);
+        return true;
+    }
+    
+    console.log(`❌ No match for "${torrentTitle}" S${seasonStr}E${episodeStr}`);
+    return false;
 }
 
 function isExactMovieMatch(torrentTitle, movieTitle, year) {
@@ -2122,7 +2243,11 @@ async function handleStream(type, id, config, workerOrigin) {
                 }
                 searchQueries.push(...uniqueQueries);
             } else { // Regular series search strategy
-                let baseQuery = `${mediaDetails.title} S${String(season).padStart(2, '0')}E${String(episode).padStart(2, '0')}`;
+                const seasonStr = String(season).padStart(2, '0');
+                const episodeStr = String(episode).padStart(2, '0');
+                
+                // 1. Query specifica per episodio
+                let baseQuery = `${mediaDetails.title} S${seasonStr}E${episodeStr}`;
                 if (mediaDetails.tmdbId) {
                     const tvShowDetails = await getTVShowDetails(mediaDetails.tmdbId, season, episode, tmdbKey);
                     if (tvShowDetails && tvShowDetails.episodeTitle) {
@@ -2130,7 +2255,17 @@ async function handleStream(type, id, config, workerOrigin) {
                     }
                 }
                 searchQueries.push(baseQuery);
-                searchQueries.push(`${mediaDetails.title} S${String(season).padStart(2, '0')}`);
+                
+                // 2. ✅ NUOVA QUERY: Season pack (es: "Simpson S27" per trovare pack completi)
+                searchQueries.push(`${mediaDetails.title} S${seasonStr}`);
+                
+                // 3. ✅ NUOVA QUERY: "Stagione XX" in italiano
+                searchQueries.push(`${mediaDetails.title} Stagione ${season}`);
+                
+                // 4. ✅ NUOVA QUERY: "Season XX" in inglese
+                searchQueries.push(`${mediaDetails.title} Season ${season}`);
+                
+                // 5. Fallback: solo il titolo (per pack multi-stagione)
                 searchQueries.push(mediaDetails.title);
             }
         } else { // Movie
@@ -2142,7 +2277,14 @@ async function handleStream(type, id, config, workerOrigin) {
         if (italianTitle) {
             console.log(`🇮🇹 Adding Italian title "${italianTitle}" to search queries.`);
             if (type === 'series' && !kitsuId) {
-                searchQueries.push(`${italianTitle} S${String(season).padStart(2, '0')}`);
+                const seasonStr = String(season).padStart(2, '0');
+                const episodeStr = String(episode).padStart(2, '0');
+                
+                // Query specifiche con titolo italiano
+                searchQueries.push(`${italianTitle} S${seasonStr}E${episodeStr}`);
+                searchQueries.push(`${italianTitle} S${seasonStr}`);
+                searchQueries.push(`${italianTitle} Stagione ${season}`);
+                searchQueries.push(`${italianTitle} Season ${season}`);
                 searchQueries.push(italianTitle);
             } else if (type === 'movie') {
                 searchQueries.push(`${italianTitle} ${mediaDetails.year}`);
@@ -2153,7 +2295,14 @@ async function handleStream(type, id, config, workerOrigin) {
         if (originalTitle) {
             console.log(`🌍 Adding original title "${originalTitle}" to search queries.`);
             if (type === 'series' && !kitsuId) {
-                searchQueries.push(`${originalTitle} S${String(season).padStart(2, '0')}`);
+                const seasonStr = String(season).padStart(2, '0');
+                const episodeStr = String(episode).padStart(2, '0');
+                
+                // Query specifiche con titolo originale
+                searchQueries.push(`${originalTitle} S${seasonStr}E${episodeStr}`);
+                searchQueries.push(`${originalTitle} S${seasonStr}`);
+                searchQueries.push(`${originalTitle} Stagione ${season}`);
+                searchQueries.push(`${originalTitle} Season ${season}`);
                 searchQueries.push(originalTitle);
             } else if (type === 'movie') {
                 searchQueries.push(`${originalTitle} ${mediaDetails.year}`);
@@ -2444,6 +2593,7 @@ async function handleStream(type, id, config, workerOrigin) {
                 const qualityDisplay = result.quality ? result.quality.toUpperCase() : 'Unknown';
                 const qualitySymbol = getQualitySymbol(qualityDisplay);
                 const { icon: languageIcon } = getLanguageInfo(result.title, italianTitle);
+                const packIcon = isSeasonPack(result.title) ? '📦 ' : ''; // Season pack indicator
                 const encodedConfig = btoa(JSON.stringify(config));
                 const infoHashLower = result.infoHash.toLowerCase();
                 
@@ -2477,7 +2627,7 @@ async function handleStream(type, id, config, workerOrigin) {
                     const streamName = [
                         cachedIcon + errorIcon + '🔵 ',
                         `[${result.source}]`,
-                        languageIcon,
+                        packIcon + languageIcon,  // ← Pack icon + Language icon
                         qualitySymbol,
                         qualityDisplay,
                         `👥 ${result.seeders || 0}/${result.leechers || 0}`,
@@ -2554,7 +2704,7 @@ async function handleStream(type, id, config, workerOrigin) {
                     const streamName = [
                         cachedIcon + errorIcon + '📦 ',
                         `[${result.source}]`,
-                        languageIcon,
+                        packIcon + languageIcon,  // ← Pack icon + Language icon
                         qualitySymbol,
                         qualityDisplay,
                         `👥 ${result.seeders || 0}/${result.leechers || 0}`,
@@ -2622,7 +2772,7 @@ async function handleStream(type, id, config, workerOrigin) {
                     const streamName = [
                         cachedIcon + errorIcon + '🅰️ ',
                         `[${result.source}]`,
-                        languageIcon,
+                        packIcon + languageIcon,  // ← Pack icon + Language icon
                         qualitySymbol,
                         qualityDisplay,
                         `👥 ${result.seeders || 0}/${result.leechers || 0}`,
@@ -2668,7 +2818,7 @@ async function handleStream(type, id, config, workerOrigin) {
                     const streamName = [
                         '[P2P]',
                         `[${result.source}]`,
-                        languageIcon,
+                        packIcon + languageIcon,  // ← Pack icon + Language icon
                         qualitySymbol,
                         qualityDisplay,
                         `👥 ${result.seeders || 0}/${result.leechers || 0}`,
