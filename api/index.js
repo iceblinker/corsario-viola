@@ -245,26 +245,11 @@ async function fetchCorsaroNeroSingle(searchQuery, type = 'movie') {
     console.log(`🏴‍☠️ [Single Query] Searching Il Corsaro Nero for: "${searchQuery}" (type: ${type})`);
 
     try {
-        let searchCategory;
-        let outputCategory;
-        switch (type) {
-            case 'movie':
-                searchCategory = 'film';
-                outputCategory = 'Movies';
-                break;
-            case 'series':
-                searchCategory = 'serie-tv';
-                outputCategory = 'TV';
-                break;
-            case 'anime':
-                searchCategory = 'anime';
-                outputCategory = 'Anime';
-                break;
-            default:
-                searchCategory = 'serie-tv';
-                outputCategory = 'TV';
-        }
-        const searchUrl = `${CORSARO_BASE_URL}/search?q=${encodeURIComponent(searchQuery)}&cat=${searchCategory}`;
+        // ✅ MODIFICA: Non usiamo più categorie nella ricerca perché:
+        // - I Simpson sono in "Animazione - Serie" non "Serie TV"
+        // - Vogliamo trovare tutti i risultati e poi filtrarli noi
+        const outputCategory = type === 'movie' ? 'Movies' : (type === 'anime' ? 'Anime' : 'TV');
+        const searchUrl = `${CORSARO_BASE_URL}/search?q=${encodeURIComponent(searchQuery)}`;
         
         const searchResponse = await fetch(searchUrl, {
             headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' }
@@ -280,20 +265,36 @@ async function fetchCorsaroNeroSingle(searchQuery, type = 'movie') {
         console.log(`🏴‍☠️ [DEBUG] Search response HTML size: ${searchHtml.length} chars`);
         const allTables = $('table').length;
         const allTbody = $('tbody').length;
-        const allRows = $('tr').length;
-        console.log(`🏴‍☠️ [DEBUG] Found ${allTables} tables, ${allTbody} tbody, ${allRows} total rows`);
+        const totalRows = $('tr').length;
+        console.log(`🏴‍☠️ [DEBUG] Found ${allTables} tables, ${allTbody} tbody, ${totalRows} total rows`);
         
-        // ✅ Filter out header rows - only process rows that have a title link
-        const rows = $('tbody tr').filter((i, row) => {
-            return $(row).find('th a').length > 0; // Has a title link
+        // ✅ DEBUGGING: Let's see what's in those rows
+        const allRows = $('tbody tr');
+        console.log(`🏴‍☠️ [DEBUG] Analyzing ${allRows.length} tbody rows...`);
+        
+        allRows.each((i, row) => {
+            const thLinks = $(row).find('th a').length;
+            const tdLinks = $(row).find('td a').length;
+            const totalLinks = $(row).find('a').length;
+            const rowText = $(row).text().trim().substring(0, 100);
+            console.log(`🏴‍☠️ [DEBUG] Row ${i}: th_links=${thLinks}, td_links=${tdLinks}, total=${totalLinks}, text="${rowText}"`);
         });
         
+        // ✅ Try different selectors to find torrent rows
+        let rows = $('tbody tr').filter((i, row) => {
+            return $(row).find('th a').length > 0; // Has a title link in th
+        });
+        
+        // If no results with 'th a', try 'td a'
         if (rows.length === 0) {
-            console.log('🏴‍☠️ No results found on CorsaroNero (after filtering header rows).');
-            // 🔍 Try alternative selectors
-            console.log(`🏴‍☠️ [DEBUG] Trying alternative selector: table tr with links`);
-            const altRows = $('table tr').filter((i, row) => $(row).find('a').length > 0);
-            console.log(`🏴‍☠️ [DEBUG] Alternative selector found ${altRows.length} rows`);
+            console.log('🏴‍☠️ [DEBUG] No rows with "th a", trying "td a"...');
+            rows = $('tbody tr').filter((i, row) => {
+                return $(row).find('td a[href*="/torrent/"]').length > 0; // Has torrent link in td
+            });
+        }
+        
+        if (rows.length === 0) {
+            console.log('🏴‍☠️ No results found on CorsaroNero (after trying multiple selectors).');
             
             // Check if page contains "Nessun risultato" or similar
             const pageText = $('body').text().toLowerCase();
@@ -317,11 +318,49 @@ async function fetchCorsaroNeroSingle(searchQuery, type = 'movie') {
         }
 
         const streamPromises = rowsToProcess.map(async (row) => {
-            const titleElement = $(row).find('th a');
-            if (!titleElement.length) return null;
+            // ✅ Try multiple selectors to find title link
+            let titleElement = $(row).find('th a');
+            if (!titleElement.length) {
+                titleElement = $(row).find('td a[href*="/torrent/"]');
+            }
+            
+            if (!titleElement.length) {
+                console.log(`🏴‍☠️   - Skipped row: no title link found`);
+                return null;
+            }
+            
             const torrentTitle = titleElement.text().trim();
+            const torrentPath = titleElement.attr('href');
+
+            if (!torrentTitle || !torrentPath) {
+                console.log(`🏴‍☠️   - Skipped row: missing title or path`);
+                return null;
+            }
 
             console.log(`🏴‍☠️   - Processing row: "${torrentTitle}"`);
+            
+            // ✅ NUOVO: Estrai categoria dalla riga
+            const cells = $(row).find('td');
+            const categoryText = cells.length > 0 ? cells.eq(0).text().trim() : '';
+            console.log(`🏴‍☠️   - Category: "${categoryText}"`);
+            
+            // ✅ NUOVO: Filtra per tipo (solo serie/anime per serie, solo film per film)
+            if (type === 'series' || type === 'anime') {
+                // Per serie TV, accetta: "Serie TV", "Animazione - Serie", "Animazione"
+                const isSeriesCategory = /serie|animazione/i.test(categoryText) && !/\bfilm\b/i.test(categoryText);
+                if (!isSeriesCategory) {
+                    console.log(`🏴‍☠️   - Skipped: wrong category for series (got "${categoryText}")`);
+                    return null;
+                }
+            } else if (type === 'movie') {
+                // Per film, accetta: "Film", "Animazione - Film"
+                const isMovieCategory = /film/i.test(categoryText);
+                if (!isMovieCategory) {
+                    console.log(`🏴‍☠️   - Skipped: wrong category for movie (got "${categoryText}")`);
+                    return null;
+                }
+            }
+            
             // --- NUOVA MODIFICA: Validazione per query brevi (skip per season packs) ---
             // I season pack possono avere titoli molto diversi dalla query, es: "Stagione 1-34"
             const looksLikeSeasonPack = /stagion[ei]|season|completa|complete|s\d+\s*[-–—]\s*s?\d+/i.test(torrentTitle);
@@ -331,11 +370,7 @@ async function fetchCorsaroNeroSingle(searchQuery, type = 'movie') {
             }
             // --- FINE MODIFICA ---
 
-            const torrentPath = titleElement.attr('href');
-            if (!torrentPath) return null;
-
             // --- OTTIMIZZAZIONE: Estrai la dimensione dalla pagina dei risultati ---
-            const cells = $(row).find('td');
             const sizeStr = cells.length > 3 ? cells.eq(3).text().trim() : 'Unknown';
             const sizeInBytes = parseSize(sizeStr);
             // --- FINE OTTIMIZZAZIONE ---
@@ -2617,7 +2652,17 @@ async function handleStream(type, id, config, workerOrigin) {
                 const qualityDisplay = result.quality ? result.quality.toUpperCase() : 'Unknown';
                 const qualitySymbol = getQualitySymbol(qualityDisplay);
                 const { icon: languageIcon } = getLanguageInfo(result.title, italianTitle);
-                const packIcon = isSeasonPack(result.title) ? '📦 ' : ''; // Season pack indicator
+                
+                // ✅ Enhanced pack icon with episode info
+                let packIcon = '';
+                if (isSeasonPack(result.title)) {
+                    if (type === 'series' && season && episode) {
+                        packIcon = `📦[S${String(season).padStart(2, '0')}E${String(episode).padStart(2, '0')}] `;
+                    } else {
+                        packIcon = '📦 ';
+                    }
+                }
+                
                 const encodedConfig = btoa(JSON.stringify(config));
                 const infoHashLower = result.infoHash.toLowerCase();
                 
@@ -2668,10 +2713,17 @@ async function handleStream(type, id, config, workerOrigin) {
                         cacheInfoText = '📥🧲 Aggiungi a Real-Debrid';
                     }
                     
+                    // ✅ Add season pack info for series
+                    let packInfo = '';
+                    if (isSeasonPack(result.title) && type === 'series' && season && episode) {
+                        packInfo = `\n📦 Pack completo - RD selezionerà automaticamente S${String(season).padStart(2, '0')}E${String(episode).padStart(2, '0')}`;
+                    }
+                    
                     const streamTitle = [
                         `🎬 ${result.title}`,
                         `📡 ${result.source} | 💾 ${result.size} | 👥 ${result.seeders || 0} seeds`,
                         cacheInfoText,
+                        packInfo,
                         result.categories?.[0] ? `📂 ${result.categories[0]}` : '',
                         debugInfo
                     ].filter(Boolean).join('\n');
@@ -2744,10 +2796,17 @@ async function handleStream(type, id, config, workerOrigin) {
                         cacheInfoText = '📥🧲 Aggiungi a Torbox';
                     }
                     
+                    // ✅ Add season pack info for series
+                    let packInfo = '';
+                    if (isSeasonPack(result.title) && type === 'series' && season && episode) {
+                        packInfo = `\n📦 Pack completo - Torbox selezionerà automaticamente S${String(season).padStart(2, '0')}E${String(episode).padStart(2, '0')}`;
+                    }
+                    
                     const streamTitle = [
                         `🎬 ${result.title}`,
                         `📡 ${result.source} | 💾 ${result.size} | 👥 ${result.seeders || 0} seeds`,
                         cacheInfoText,
+                        packInfo,
                         result.categories?.[0] ? `📂 ${result.categories[0]}` : '',
                     ].filter(Boolean).join('\n');
                     
@@ -2810,10 +2869,17 @@ async function handleStream(type, id, config, workerOrigin) {
                         cacheInfoText = '📥🧲 Aggiungi a AllDebrid';
                     }
                     
+                    // ✅ Add season pack info for series
+                    let packInfo = '';
+                    if (isSeasonPack(result.title) && type === 'series' && season && episode) {
+                        packInfo = `\n📦 Pack completo - AllDebrid selezionerà automaticamente S${String(season).padStart(2, '0')}E${String(episode).padStart(2, '0')}`;
+                    }
+                    
                     const streamTitle = [
                         `🎬 ${result.title}`,
                         `📡 ${result.source} | 💾 ${result.size} | 👥 ${result.seeders || 0} seeds`,
                         cacheInfoText,
+                        packInfo,
                         result.categories?.[0] ? `📂 ${result.categories[0]}` : '',
                     ].filter(Boolean).join('\n');
                     
@@ -2849,10 +2915,17 @@ async function handleStream(type, id, config, workerOrigin) {
                         result.size && result.size !== 'Unknown' ? `💾 ${result.size}` : null
                     ].filter(Boolean).join(' | ');
 
+                    // ✅ Add season pack info for series
+                    let packInfo = '';
+                    if (isSeasonPack(result.title) && type === 'series' && season && episode) {
+                        packInfo = `\n📦 Pack completo - Stremio scaricherà solo S${String(season).padStart(2, '0')}E${String(episode).padStart(2, '0')}`;
+                    }
+
                     const streamTitle = [
                         `🎬 ${result.title}`,
                         `📡 ${result.source} | 💾 ${result.size} | 👥 ${result.seeders || 0} seeds`,
                         '🔗 Link Magnet diretto (P2P)',
+                        packInfo,
                         result.categories?.[0] ? `📂 ${result.categories[0]}` : ''
                     ].filter(Boolean).join('\n');
 
