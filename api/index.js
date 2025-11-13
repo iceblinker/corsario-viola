@@ -283,13 +283,16 @@ async function fetchCorsaroNeroSingle(searchQuery, type = 'movie') {
         const allRows = $('tr').length;
         console.log(`🏴‍☠️ [DEBUG] Found ${allTables} tables, ${allTbody} tbody, ${allRows} total rows`);
         
-        const rows = $('tbody tr');
+        // ✅ Filter out header rows - only process rows that have a title link
+        const rows = $('tbody tr').filter((i, row) => {
+            return $(row).find('th a').length > 0; // Has a title link
+        });
         
         if (rows.length === 0) {
-            console.log('🏴‍☠️ No results found on CorsaroNero.');
+            console.log('🏴‍☠️ No results found on CorsaroNero (after filtering header rows).');
             // 🔍 Try alternative selectors
-            console.log(`🏴‍☠️ [DEBUG] Trying alternative selector: table tr`);
-            const altRows = $('table tr');
+            console.log(`🏴‍☠️ [DEBUG] Trying alternative selector: table tr with links`);
+            const altRows = $('table tr').filter((i, row) => $(row).find('a').length > 0);
             console.log(`🏴‍☠️ [DEBUG] Alternative selector found ${altRows.length} rows`);
             
             // Check if page contains "Nessun risultato" or similar
@@ -306,7 +309,12 @@ async function fetchCorsaroNeroSingle(searchQuery, type = 'movie') {
         const MAX_DETAILS_TO_FETCH = 6;
         const rowsToProcess = rows.toArray().slice(0, MAX_DETAILS_TO_FETCH);
 
-        console.log(`🏴‍☠️ Found ${rows.length} potential results on CorsaroNero. Fetching details for top ${rowsToProcess.length}...`);
+        console.log(`🏴‍☠️ Processing ${rowsToProcess.length} rows (filtered from ${rows.length} total)...`);
+        
+        if (rowsToProcess.length === 0) {
+            console.log('🏴‍☠️ ⚠️ No rows to process after filtering!');
+            return [];
+        }
 
         const streamPromises = rowsToProcess.map(async (row) => {
             const titleElement = $(row).find('th a');
@@ -2257,7 +2265,13 @@ async function handleStream(type, id, config, workerOrigin) {
                 const seasonStr = String(season).padStart(2, '0');
                 const episodeStr = String(episode).padStart(2, '0');
                 
-                // 1. Query specifica per episodio
+                // ✅ STRATEGIA MODIFICATA: Prima cerca il titolo base per trovare MEGA PACK
+                // Questo risolve il problema di Il Corsaro Nero che ha "Stagione 1-34" invece di stagioni singole
+                
+                // 1. PRIORITÀ MASSIMA: Solo il titolo (trova pack multi-stagione)
+                searchQueries.push(mediaDetails.title);
+                
+                // 2. Query specifica per episodio (per torrent di episodi singoli)
                 let baseQuery = `${mediaDetails.title} S${seasonStr}E${episodeStr}`;
                 if (mediaDetails.tmdbId) {
                     const tvShowDetails = await getTVShowDetails(mediaDetails.tmdbId, season, episode, tmdbKey);
@@ -2267,17 +2281,14 @@ async function handleStream(type, id, config, workerOrigin) {
                 }
                 searchQueries.push(baseQuery);
                 
-                // 2. ✅ NUOVA QUERY: Season pack (es: "Simpson S27" per trovare pack completi)
+                // 3. Season pack con numero stagione (es: "Simpson S27")
                 searchQueries.push(`${mediaDetails.title} S${seasonStr}`);
                 
-                // 3. ✅ NUOVA QUERY: "Stagione XX" in italiano
+                // 4. "Stagione XX" in italiano
                 searchQueries.push(`${mediaDetails.title} Stagione ${season}`);
                 
-                // 4. ✅ NUOVA QUERY: "Season XX" in inglese
+                // 5. "Season XX" in inglese
                 searchQueries.push(`${mediaDetails.title} Season ${season}`);
-                
-                // 5. Fallback: solo il titolo (per pack multi-stagione)
-                searchQueries.push(mediaDetails.title);
             }
         } else { // Movie
             searchQueries.push(`${mediaDetails.title} ${mediaDetails.year}`);
@@ -2291,12 +2302,14 @@ async function handleStream(type, id, config, workerOrigin) {
                 const seasonStr = String(season).padStart(2, '0');
                 const episodeStr = String(episode).padStart(2, '0');
                 
+                // ✅ PRIORITÀ: Titolo italiano da solo (per trovare mega pack)
+                searchQueries.unshift(italianTitle); // unshift = aggiungi all'inizio per priorità
+                
                 // Query specifiche con titolo italiano
                 searchQueries.push(`${italianTitle} S${seasonStr}E${episodeStr}`);
                 searchQueries.push(`${italianTitle} S${seasonStr}`);
                 searchQueries.push(`${italianTitle} Stagione ${season}`);
                 searchQueries.push(`${italianTitle} Season ${season}`);
-                searchQueries.push(italianTitle);
             } else if (type === 'movie') {
                 searchQueries.push(`${italianTitle} ${mediaDetails.year}`);
                 searchQueries.push(italianTitle);
