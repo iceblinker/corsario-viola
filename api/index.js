@@ -286,6 +286,16 @@ async function fetchCorsaroNeroSingle(searchQuery, type = 'movie') {
             return [];
         }
 
+        // Check if it's the "no results" message
+        if (rows.length === 1) {
+            const firstCell = $(rows[0]).find('td').first();
+            const text = firstCell.text().trim().toLowerCase();
+            if (text.includes('nessun torrent') || text.includes('no torrent')) {
+                console.log('🏴‍☠️ No results found on CorsaroNero (no torrent message).');
+                return [];
+            }
+        }
+
         console.log(`🏴‍☠️ Found ${rows.length} potential results on CorsaroNero. Filtering by category...`);
         
         // Filtra le righe in base alla categoria
@@ -2916,7 +2926,7 @@ async function getTMDBDetails(tmdbId, type = 'movie', tmdbApiKey, append = 'exte
         if (!response.ok) throw new Error(`TMDB API error: ${response.status}`);
         return await response.json();
     } catch (error) {
-        console.error('TMDB fetch error:', error);
+        console.warn('⚠️ TMDB fetch warning (will use fallback):', error.message);
         return null;
     }
 }
@@ -2932,7 +2942,7 @@ async function getTVShowDetails(tmdbId, seasonNum, episodeNum, tmdbApiKey) {
         const episodeResponse = await fetch(
             `${TMDB_BASE_URL}/tv/${tmdbId}/season/${seasonNum}/episode/${episodeNum}?api_key=${tmdbApiKey}`
         );
-        if (!episodeResponse.ok) throw new Error(`TMDB API error: ${episodeResponse.status}`);
+        if (!episodeResponse.ok) throw new Error(`TMDB episode API error: ${episodeResponse.status}`);
         const episodeData = await episodeResponse.json();
 
         return {
@@ -2944,7 +2954,7 @@ async function getTVShowDetails(tmdbId, seasonNum, episodeNum, tmdbApiKey) {
             imdbId: showData.external_ids?.imdb_id
         };
     } catch (error) {
-        console.error('TMDB fetch error:', error);
+        console.warn('⚠️ TMDB TV fetch warning (will use fallback):', error.message);
         return null;
     }
 }
