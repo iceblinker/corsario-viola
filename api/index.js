@@ -245,114 +245,75 @@ async function fetchCorsaroNeroSingle(searchQuery, type = 'movie') {
     console.log(`🏴‍☠️ [Single Query] Searching Il Corsaro Nero for: "${searchQuery}" (type: ${type})`);
 
     try {
-        let searchCategories = [];
+        // Definisce le categorie da accettare in base al tipo
+        let acceptedCategories;
         let outputCategory;
-        
         switch (type) {
             case 'movie':
-                searchCategories = ['film', 'animazione']; // Film può essere anche in Animazione - Film
+                acceptedCategories = ['film', 'animazione - film'];
                 outputCategory = 'Movies';
                 break;
             case 'series':
-                searchCategories = ['serie-tv', 'animazione']; // Serie può essere anche in Animazione - Serie
+                acceptedCategories = ['serie tv', 'animazione - serie'];
                 outputCategory = 'TV';
                 break;
             case 'anime':
-                searchCategories = ['animazione']; // Anime solo in Animazione
+                acceptedCategories = ['animazione - film', 'animazione - serie'];
                 outputCategory = 'Anime';
                 break;
             default:
-                searchCategories = ['serie-tv', 'animazione'];
+                acceptedCategories = ['serie tv', 'animazione - serie'];
                 outputCategory = 'TV';
         }
-
-        let allRows = [];
-        let searchHtml = '';
-        let lastSearchUrl = '';
         
-        // Helper function per determinare se un titolo è una serie o un film
-        const looksLikeSeries = (title) => {
-            const seriesPatterns = [
-                /S\d{1,2}E\d{1,2}/i,           // S01E01
-                /S\d{1,2}\s/i,                  // S01, S1
-                /Season\s*\d+/i,                // Season 1
-                /Stagione\s*\d+/i,              // Stagione 1
-                /\d{1,2}x\d{1,2}/i,            // 1x01
-                /Complete\s*Series/i,           // Complete Series
-                /Serie\s*Completa/i,            // Serie Completa
-                /Stagioni?\s*\d+/i             // Stagione 1, Stagioni 1-5
-            ];
-            return seriesPatterns.some(pattern => pattern.test(title));
-        };
+        // Cerca senza filtro categoria per avere tutti i risultati
+        const searchUrl = `${CORSARO_BASE_URL}/search?q=${encodeURIComponent(searchQuery)}`;
         
-        // Cerca in tutte le categorie rilevanti
-        for (const searchCategory of searchCategories) {
-            const searchUrl = `${CORSARO_BASE_URL}/search?q=${encodeURIComponent(searchQuery)}&cat=${searchCategory}`;
-            console.log(`🏴‍☠️   Searching in category: ${searchCategory}`);
-            
-            const searchResponse = await fetch(searchUrl, {
-                headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' }
-            });
-            
-            if (!searchResponse.ok) {
-                console.log(`🏴‍☠️   Category ${searchCategory} search failed with status ${searchResponse.status}`);
-                continue;
-            }
-            
-            const categoryHtml = await searchResponse.text();
-            const $cat = cheerio.load(categoryHtml);
-            const rows = $cat('tbody tr');
-            
-            console.log(`🏴‍☠️   Found ${rows.length} results in category: ${searchCategory}`);
-            
-            // Se stiamo cercando una serie, filtra i film dalla categoria animazione
-            if (type === 'series' && searchCategory === 'animazione' && rows.length > 0) {
-                const filteredRows = rows.toArray().filter(row => {
-                    const title = $cat(row).find('th a').text().trim();
-                    const isSeries = looksLikeSeries(title);
-                    if (!isSeries) {
-                        console.log(`🏴‍☠️   Filtering out movie from animation: "${title}"`);
-                    }
-                    return isSeries;
-                });
-                console.log(`🏴‍☠️   After filtering: ${filteredRows.length} series results from animation category`);
-                allRows.push(...filteredRows);
-            } else if (type === 'movie' && searchCategory === 'animazione' && rows.length > 0) {
-                // Se stiamo cercando un film, filtra le serie dalla categoria animazione
-                const filteredRows = rows.toArray().filter(row => {
-                    const title = $cat(row).find('th a').text().trim();
-                    const isSeries = looksLikeSeries(title);
-                    if (isSeries) {
-                        console.log(`🏴‍☠️   Filtering out series from animation: "${title}"`);
-                    }
-                    return !isSeries;
-                });
-                console.log(`🏴‍☠️   After filtering: ${filteredRows.length} movie results from animation category`);
-                allRows.push(...filteredRows);
-            } else {
-                allRows.push(...rows.toArray());
-            }
-            
-            // Salva l'ultimo HTML e URL validi
-            if (rows.length > 0) {
-                searchHtml = categoryHtml;
-                lastSearchUrl = searchUrl;
-            }
+        const searchResponse = await fetch(searchUrl, {
+            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' }
+        });
+        if (!searchResponse.ok) {
+            throw new Error(`CorsaroNero search failed with status ${searchResponse.status}`);
         }
+        const searchHtml = await searchResponse.text();
+
+        const $ = cheerio.load(searchHtml);
+        const rows = $('tbody tr');
         
-        if (allRows.length === 0) {
-            console.log('🏴‍☠️ No results found on CorsaroNero in any category.');
+        if (rows.length === 0) {
+            console.log('🏴‍☠️ No results found on CorsaroNero.');
             return [];
         }
 
-        const $ = cheerio.load(searchHtml);
-
-        console.log(`🏴‍☠️ Found ${allRows.length} potential results on CorsaroNero. Fetching details...`);
+        console.log(`🏴‍☠️ Found ${rows.length} potential results on CorsaroNero. Filtering by category...`);
+        
+        // Filtra le righe in base alla categoria
+        const filteredRows = rows.toArray().filter((row) => {
+            const categoryElement = $(row).find('td:first-child span');
+            if (!categoryElement.length) return false;
+            
+            const category = categoryElement.text().trim().toLowerCase();
+            const isAccepted = acceptedCategories.some(acceptedCat => category === acceptedCat);
+            
+            if (!isAccepted) {
+                console.log(`🏴‍☠️   - Skipping category: "${category}"`);
+            }
+            
+            return isAccepted;
+        });
+        
+        console.log(`🏴‍☠️ After category filter: ${filteredRows.length} results (from ${rows.length} total)`);
+        
+        if (filteredRows.length === 0) {
+            console.log('🏴‍☠️ No results found matching the category criteria.');
+            return [];
+        }
+        
         // Limit the number of detail pages to fetch to avoid "Too many subrequests" error on Cloudflare.
         const MAX_DETAILS_TO_FETCH = 6;
-        const rowsToProcess = allRows.slice(0, MAX_DETAILS_TO_FETCH);
+        const rowsToProcess = filteredRows.slice(0, MAX_DETAILS_TO_FETCH);
 
-        console.log(`🏴‍☠️ Found ${allRows.length} potential results on CorsaroNero. Fetching details for top ${rowsToProcess.length}...`);
+        console.log(`🏴‍☠️ Fetching details for top ${rowsToProcess.length} results...`);
 
         const streamPromises = rowsToProcess.map(async (row) => {
             const titleElement = $(row).find('th a');
@@ -378,7 +339,7 @@ async function fetchCorsaroNeroSingle(searchQuery, type = 'movie') {
             const torrentPageUrl = `${CORSARO_BASE_URL}${torrentPath}`;
 
             try {
-                const detailResponse = await fetch(torrentPageUrl, { headers: { 'Referer': lastSearchUrl } });
+                const detailResponse = await fetch(torrentPageUrl, { headers: { 'Referer': searchUrl } });
                 if (!detailResponse.ok) return null;
 
                 const detailHtml = await detailResponse.text();
