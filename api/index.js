@@ -177,26 +177,6 @@ function getLanguageInfo(title, italianMovieTitle = null) {
     return { icon: isIta ? '🇮🇹 ' : '', isItalian: isIta, isMulti: false };
 }
 
-// ✅ NUOVA FUNZIONE: Detecta Season Pack
-function isSeasonPack(title) {
-    if (!title) return false;
-    const lowerTitle = title.toLowerCase();
-    
-    // Pattern per pack completi/multi-stagione
-    const packPatterns = [
-        /stagion[ei]\s*\d+\s*[-–—]\s*\d+/i,  // Stagione 1-34
-        /season\s*\d+\s*[-–—]\s*\d+/i,       // Season 1-34
-        /s\d+\s*[-–—]\s*s?\d+/i,             // S01-S34
-        /completa/i,                          // Completa
-        /complete/i,                          // Complete
-        /integrale/i,                         // Integrale
-        /collection/i,                        // Collection
-        /\bpack\b/i                          // Pack
-    ];
-    
-    return packPatterns.some(pattern => pattern.test(lowerTitle));
-}
-
 // ✅ NUOVA FUNZIONE: Filtro per categorie per adulti
 function isAdultCategory(categoryText) {
     if (!categoryText) return false;
@@ -245,11 +225,26 @@ async function fetchCorsaroNeroSingle(searchQuery, type = 'movie') {
     console.log(`🏴‍☠️ [Single Query] Searching Il Corsaro Nero for: "${searchQuery}" (type: ${type})`);
 
     try {
-        // ✅ MODIFICA: Non usiamo più categorie nella ricerca perché:
-        // - I Simpson sono in "Animazione - Serie" non "Serie TV"
-        // - Vogliamo trovare tutti i risultati e poi filtrarli noi
-        const outputCategory = type === 'movie' ? 'Movies' : (type === 'anime' ? 'Anime' : 'TV');
-        const searchUrl = `${CORSARO_BASE_URL}/search?q=${encodeURIComponent(searchQuery)}`;
+        let searchCategory;
+        let outputCategory;
+        switch (type) {
+            case 'movie':
+                searchCategory = 'film';
+                outputCategory = 'Movies';
+                break;
+            case 'series':
+                searchCategory = 'serie-tv';
+                outputCategory = 'TV';
+                break;
+            case 'anime':
+                searchCategory = 'anime';
+                outputCategory = 'Anime';
+                break;
+            default:
+                searchCategory = 'serie-tv';
+                outputCategory = 'TV';
+        }
+        const searchUrl = `${CORSARO_BASE_URL}/search?q=${encodeURIComponent(searchQuery)}&cat=${searchCategory}`;
         
         const searchResponse = await fetch(searchUrl, {
             headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' }
@@ -260,48 +255,10 @@ async function fetchCorsaroNeroSingle(searchQuery, type = 'movie') {
         const searchHtml = await searchResponse.text();
 
         const $ = cheerio.load(searchHtml);
-        
-        // 🔍 DEBUG: Log HTML structure
-        console.log(`🏴‍☠️ [DEBUG] Search response HTML size: ${searchHtml.length} chars`);
-        const allTables = $('table').length;
-        const allTbody = $('tbody').length;
-        const totalRows = $('tr').length;
-        console.log(`🏴‍☠️ [DEBUG] Found ${allTables} tables, ${allTbody} tbody, ${totalRows} total rows`);
-        
-        // ✅ DEBUGGING: Let's see what's in those rows
-        const allRows = $('tbody tr');
-        console.log(`🏴‍☠️ [DEBUG] Analyzing ${allRows.length} tbody rows...`);
-        
-        allRows.each((i, row) => {
-            const thLinks = $(row).find('th a').length;
-            const tdLinks = $(row).find('td a').length;
-            const totalLinks = $(row).find('a').length;
-            const rowText = $(row).text().trim().substring(0, 100);
-            console.log(`🏴‍☠️ [DEBUG] Row ${i}: th_links=${thLinks}, td_links=${tdLinks}, total=${totalLinks}, text="${rowText}"`);
-        });
-        
-        // ✅ Try different selectors to find torrent rows
-        let rows = $('tbody tr').filter((i, row) => {
-            return $(row).find('th a').length > 0; // Has a title link in th
-        });
-        
-        // If no results with 'th a', try 'td a'
-        if (rows.length === 0) {
-            console.log('🏴‍☠️ [DEBUG] No rows with "th a", trying "td a"...');
-            rows = $('tbody tr').filter((i, row) => {
-                return $(row).find('td a[href*="/torrent/"]').length > 0; // Has torrent link in td
-            });
-        }
+        const rows = $('tbody tr');
         
         if (rows.length === 0) {
-            console.log('🏴‍☠️ No results found on CorsaroNero (after trying multiple selectors).');
-            
-            // Check if page contains "Nessun risultato" or similar
-            const pageText = $('body').text().toLowerCase();
-            if (pageText.includes('nessun risultato') || pageText.includes('no results')) {
-                console.log('🏴‍☠️ [DEBUG] Page explicitly says no results');
-            }
-            
+            console.log('🏴‍☠️ No results found on CorsaroNero.');
             return [];
         }
 
@@ -310,67 +267,25 @@ async function fetchCorsaroNeroSingle(searchQuery, type = 'movie') {
         const MAX_DETAILS_TO_FETCH = 6;
         const rowsToProcess = rows.toArray().slice(0, MAX_DETAILS_TO_FETCH);
 
-        console.log(`🏴‍☠️ Processing ${rowsToProcess.length} rows (filtered from ${rows.length} total)...`);
-        
-        if (rowsToProcess.length === 0) {
-            console.log('🏴‍☠️ ⚠️ No rows to process after filtering!');
-            return [];
-        }
+        console.log(`🏴‍☠️ Found ${rows.length} potential results on CorsaroNero. Fetching details for top ${rowsToProcess.length}...`);
 
         const streamPromises = rowsToProcess.map(async (row) => {
-            // ✅ Try multiple selectors to find title link
-            let titleElement = $(row).find('th a');
-            if (!titleElement.length) {
-                titleElement = $(row).find('td a[href*="/torrent/"]');
-            }
-            
-            if (!titleElement.length) {
-                console.log(`🏴‍☠️   - Skipped row: no title link found`);
-                return null;
-            }
-            
+            const titleElement = $(row).find('th a');
+            if (!titleElement.length) return null;
             const torrentTitle = titleElement.text().trim();
-            const torrentPath = titleElement.attr('href');
-
-            if (!torrentTitle || !torrentPath) {
-                console.log(`🏴‍☠️   - Skipped row: missing title or path`);
-                return null;
-            }
 
             console.log(`🏴‍☠️   - Processing row: "${torrentTitle}"`);
-            
-            // ✅ NUOVO: Estrai categoria dalla riga
-            const cells = $(row).find('td');
-            const categoryText = cells.length > 0 ? cells.eq(0).text().trim() : '';
-            console.log(`🏴‍☠️   - Category: "${categoryText}"`);
-            
-            // ✅ NUOVO: Filtra per tipo (solo serie/anime per serie, solo film per film)
-            if (type === 'series' || type === 'anime') {
-                // Per serie TV, accetta: "Serie TV", "Animazione - Serie", "Animazione"
-                const isSeriesCategory = /serie|animazione/i.test(categoryText) && !/\bfilm\b/i.test(categoryText);
-                if (!isSeriesCategory) {
-                    console.log(`🏴‍☠️   - Skipped: wrong category for series (got "${categoryText}")`);
-                    return null;
-                }
-            } else if (type === 'movie') {
-                // Per film, accetta: "Film", "Animazione - Film"
-                const isMovieCategory = /film/i.test(categoryText);
-                if (!isMovieCategory) {
-                    console.log(`🏴‍☠️   - Skipped: wrong category for movie (got "${categoryText}")`);
-                    return null;
-                }
-            }
-            
-            // --- NUOVA MODIFICA: Validazione per query brevi (skip per season packs) ---
-            // I season pack possono avere titoli molto diversi dalla query, es: "Stagione 1-34"
-            const looksLikeSeasonPack = /stagion[ei]|season|completa|complete|s\d+\s*[-–—]\s*s?\d+/i.test(torrentTitle);
-            if (!looksLikeSeasonPack && !isGoodShortQueryMatch(torrentTitle, searchQuery)) {
-                console.log(`🏴‍☠️   - Skipped: doesn't match short query validation`);
+            // --- NUOVA MODIFICA: Validazione per query brevi ---
+            if (!isGoodShortQueryMatch(torrentTitle, searchQuery)) {
                 return null;
             }
             // --- FINE MODIFICA ---
 
+            const torrentPath = titleElement.attr('href');
+            if (!torrentPath) return null;
+
             // --- OTTIMIZZAZIONE: Estrai la dimensione dalla pagina dei risultati ---
+            const cells = $(row).find('td');
             const sizeStr = cells.length > 3 ? cells.eq(3).text().trim() : 'Unknown';
             const sizeInBytes = parseSize(sizeStr);
             // --- FINE OTTIMIZZAZIONE ---
@@ -378,91 +293,37 @@ async function fetchCorsaroNeroSingle(searchQuery, type = 'movie') {
             const torrentPageUrl = `${CORSARO_BASE_URL}${torrentPath}`;
 
             try {
-                console.log(`🏴‍☠️   - Fetching detail page: ${torrentPageUrl}`);
-                const detailResponse = await fetch(torrentPageUrl, { 
-                    headers: { 
-                        'Referer': searchUrl,
-                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-                    } 
-                });
-                
-                if (!detailResponse.ok) {
-                    console.log(`🏴‍☠️   - Detail page returned status: ${detailResponse.status}`);
-                    return null;
-                }
+                const detailResponse = await fetch(torrentPageUrl, { headers: { 'Referer': searchUrl } });
+                if (!detailResponse.ok) return null;
 
                 const detailHtml = await detailResponse.text();
-                console.log(`🏴‍☠️   - Detail page loaded, HTML size: ${detailHtml.length} chars`);
                 const $$ = cheerio.load(detailHtml);
 
-                // --- MODIFICA: Logica di estrazione del magnet link ULTRA robusta ---
-                let magnetLink = null;
+                // --- MODIFICA: Logica di estrazione del magnet link più robusta ---
+                let magnetLink = $$('a[href^="magnet:?"]').attr('href');
                 
-                // Method 1: Standard magnet link selector
-                magnetLink = $$('a[href^="magnet:?"]').attr('href');
-                if (magnetLink) {
-                    console.log(`🏴‍☠️ [Method 1] Found magnet link with standard selector`);
-                }
-                
-                // Method 2: Selettore specifico originale
+                // Fallback 1: Selettore specifico originale
                 if (!magnetLink) {
                     const mainDiv = $$("div.w-full:nth-child(2)");
                     if (mainDiv.length) {
                         magnetLink = mainDiv.find("a.w-full:nth-child(1)").attr('href');
-                        if (magnetLink) console.log(`🏴‍☠️ [Method 2] Found magnet link with div selector`);
                     }
                 }
 
-                // Method 3: Cerca un link con un'icona a forma di magnete
+                // Fallback 2: Cerca un link con un'icona a forma di magnete (comune)
                 if (!magnetLink) {
                     magnetLink = $$('a:has(i.fa-magnet)').attr('href');
-                    if (magnetLink) console.log(`🏴‍☠️ [Method 3] Found magnet link with icon selector`);
                 }
 
-                // Method 4: Cerca tutti i link e filtra per magnet
+                // Fallback 3: Search the entire page text for a magnet link pattern (very robust)
                 if (!magnetLink) {
-                    $$('a').each((i, elem) => {
-                        const href = $$(elem).attr('href');
-                        if (href && href.startsWith('magnet:')) {
-                            magnetLink = href;
-                            console.log(`🏴‍☠️ [Method 4] Found magnet link by scanning all anchors`);
-                            return false; // break
-                        }
-                    });
-                }
-
-                // Method 5: Cerca nel raw HTML con regex più aggressivo
-                if (!magnetLink) {
-                    const bodyHtml = $$.html();
-                    // Cerca qualsiasi occorrenza di magnet link, anche parziale
-                    const magnetMatch = bodyHtml.match(/(magnet:\?xt=urn:btih:[a-zA-Z0-9]+[^"'\s<>&]*)/i);
+                    const bodyHtml = $$.html(); // Get the full HTML content of the page
+                    // This regex looks for a magnet link inside quotes or as plain text.
+                    const magnetMatch = bodyHtml.match(/["'>\s](magnet:\?xt=urn:btih:[^"'\s<>]+)/i);
                     if (magnetMatch && magnetMatch[1]) {
                         magnetLink = magnetMatch[1];
-                        console.log(`🏴‍☠️ [Method 5] Found magnet link using raw HTML regex`);
+                        console.log('🏴‍☠️ [Magnet Fallback] Found magnet link using raw HTML search.');
                     }
-                }
-                
-                // Method 6: Cerca in script tags o attributi data-*
-                if (!magnetLink) {
-                    $$('script').each((i, elem) => {
-                        const scriptContent = $$(elem).html();
-                        const magnetMatch = scriptContent?.match(/(magnet:\?xt=urn:btih:[a-zA-Z0-9]+[^"'\s<>&]*)/i);
-                        if (magnetMatch && magnetMatch[1]) {
-                            magnetLink = magnetMatch[1];
-                            console.log(`🏴‍☠️ [Method 6] Found magnet link in script tag`);
-                            return false;
-                        }
-                    });
-                }
-                
-                // Log per debug se non trovato
-                if (!magnetLink) {
-                    console.log(`🏴‍☠️ ❌ FAILED to find magnet link for: "${torrentTitle}"`);
-                    console.log(`🏴‍☠️ 🔍 Page URL: ${torrentPageUrl}`);
-                    console.log(`🏴‍☠️ 📄 HTML length: ${detailHtml.length} chars`);
-                    console.log(`🏴‍☠️ 🔗 Total links found: ${$$('a').length}`);
-                    // Log first 500 chars of page for debugging
-                    console.log(`🏴‍☠️ 📝 HTML preview: ${detailHtml.substring(0, 500)}`);
                 }
                 // --- FINE MODIFICA ---
                 
@@ -1246,83 +1107,6 @@ function limitResultsByLanguageAndQuality(results, italianLimit = 5, otherLimit 
     return sortByQualityAndSeeders(finalResults);
 }
 
-// ✅ NUOVA FUNZIONE: Trova il file corretto in un pack basandosi su season/episode
-function findEpisodeFileInPack(files, season, episode) {
-    if (!season || !episode || !files || files.length === 0) return null;
-    
-    const videoExtensions = ['.mkv', '.mp4', '.avi', '.mov', '.wmv', '.flv', '.webm'];
-    const junkKeywords = ['sample', 'trailer', 'extra', 'bonus', 'extras'];
-    
-    // Filtra solo i file video
-    const videoFiles = files.filter(file => {
-        const lowerPath = file.path.toLowerCase();
-        return videoExtensions.some(ext => lowerPath.endsWith(ext)) &&
-               (!junkKeywords.some(junk => lowerPath.includes(junk)) || file.bytes > 250 * 1024 * 1024);
-    });
-    
-    // Pattern comuni per episodi
-    const patterns = [
-        new RegExp(`s0*${season}e0*${episode}`, 'i'),        // S27E02, s27e02, S027E002
-        new RegExp(`${season}x0*${episode}`, 'i'),           // 27x02, 27x2
-        new RegExp(`s0*${season}\\.e0*${episode}`, 'i'),     // S27.E02
-        new RegExp(`s0*${season} e0*${episode}`, 'i'),       // S27 E02
-        new RegExp(`stagione[\\s_]*0*${season}[\\s_]*ep?[\\s_]*0*${episode}`, 'i'), // Stagione 27 Ep 02
-    ];
-    
-    console.log(`🔍 [FileMatch] Looking for S${season}E${episode}`);
-    
-    // 1. Prima prova con i pattern standard (S27E02, 27x02, etc.)
-    for (const pattern of patterns) {
-        const matched = videoFiles.find(file => pattern.test(file.path));
-        if (matched) {
-            console.log(`✅ [FileMatch] Found match with pattern ${pattern}: ${matched.path}`);
-            return matched;
-        }
-    }
-    
-    // 2. Prova a trovare il file esaminando i nomi in ordine sequenziale
-    // Cerca pattern come "e602" o "ep602" dove il numero potrebbe essere l'episodio assoluto
-    const sequentialPattern = /\.e(\d{3,4})\./i; // Matches ".e602." or ".e0602."
-    const filesWithEpisodeNumbers = videoFiles
-        .map(file => {
-            const match = file.path.match(sequentialPattern);
-            return {
-                file,
-                episodeNum: match ? parseInt(match[1]) : null
-            };
-        })
-        .filter(item => item.episodeNum !== null)
-        .sort((a, b) => a.episodeNum - b.episodeNum);
-    
-    if (filesWithEpisodeNumbers.length > 0) {
-        // Cerca il file più vicino al numero di episodio calcolato
-        // Stima approssimativa: ~22 episodi per stagione
-        const estimatedAbsolute = ((season - 1) * 22) + episode;
-        const tolerance = 30; // Cerca nell'intervallo ±30 episodi
-        
-        // Trova il match più vicino (non solo il primo)
-        let bestMatch = null;
-        let bestDistance = Infinity;
-        
-        for (const item of filesWithEpisodeNumbers) {
-            const distance = Math.abs(item.episodeNum - estimatedAbsolute);
-            if (distance <= tolerance && distance < bestDistance) {
-                bestMatch = item;
-                bestDistance = distance;
-            }
-        }
-        
-        if (bestMatch) {
-            console.log(`✅ [FileMatch] Found sequential match (e${bestMatch.episodeNum} ≈ S${season}E${episode}, est. e${estimatedAbsolute}): ${bestMatch.file.path}`);
-            return bestMatch.file;
-        }
-    }
-    
-    // 3. Se non trova nulla, restituisci null (userà fallback più grande)
-    console.log(`⚠️ [FileMatch] No match found for S${season}E${episode}, will use fallback`);
-    return null;
-}
-
 // ✅ Funzione di logging asincrona che non blocca la risposta
 async function logRequest(request, response, duration) {
     const { method } = request;
@@ -2093,7 +1877,7 @@ async function fetchUIndexData(searchQuery, type = 'movie', italianTitle = null)
     }
 }
 
-// ✅ IMPROVED Matching functions - Supporta SEASON PACKS come Torrentio
+// ✅ Matching functions (unchanged but improved logging)
 function isExactEpisodeMatch(torrentTitle, showTitleOrTitles, seasonNum, episodeNum, isAnime = false) {
     if (!torrentTitle || !showTitleOrTitles) return false;
     
@@ -2148,8 +1932,7 @@ function isExactEpisodeMatch(torrentTitle, showTitleOrTitles, seasonNum, episode
     const seasonStr = String(seasonNum).padStart(2, '0');
     const episodeStr = String(episodeNum).padStart(2, '0');
     
-    // ✅ NUOVA LOGICA: Cerca prima l'episodio specifico
-    const exactEpisodePatterns = [
+    const patterns = [
         new RegExp(`s${seasonStr}e${episodeStr}`, 'i'),
         new RegExp(`${seasonNum}x${episodeStr}`, 'i'),
         new RegExp(`[^0-9]${seasonNum}${episodeStr}[^0-9]`, 'i'),
@@ -2157,45 +1940,10 @@ function isExactEpisodeMatch(torrentTitle, showTitleOrTitles, seasonNum, episode
         new RegExp(`s${seasonStr}\.?e${episodeStr}`, 'i'),
         new RegExp(`${seasonStr}${episodeStr}`, 'i')
     ];
-    
-    const exactMatch = exactEpisodePatterns.some(pattern => pattern.test(normalizedTorrentTitle));
-    if (exactMatch) {
-        console.log(`✅ [EXACT] Episode match for "${torrentTitle}" S${seasonStr}E${episodeStr}`);
-        return true;
-    }
-    
-    // ✅ NUOVA LOGICA: Se non trova l'episodio esatto, cerca SEASON PACK
-    // Es: "Simpson Stagione 27", "Simpson S27", "Simpson Season 27 Complete"
-    const seasonPackPatterns = [
-        // Italiano
-        new RegExp(`stagione\\s*${seasonNum}`, 'i'),
-        new RegExp(`stagione\\s*${seasonStr}`, 'i'),
-        // Inglese
-        new RegExp(`season\\s*${seasonNum}\\b`, 'i'),
-        new RegExp(`season\\s*${seasonStr}\\b`, 'i'),
-        // Formato compatto
-        new RegExp(`\\bs${seasonStr}\\b(?!e)`, 'i'), // S27 ma non S27E
-        new RegExp(`\\bs${seasonNum}\\b(?!e)`, 'i'), // S27 ma non S27E
-        // Multi-stagione che include questa stagione
-        // Es: "Stagione 1-34", "Season 1-27", "S01-S27"
-        new RegExp(`stagion[ei]\\s*\\d+\\s*[-–—]\\s*\\d*${seasonNum}`, 'i'),
-        new RegExp(`season\\s*\\d+\\s*[-–—]\\s*\\d*${seasonNum}`, 'i'),
-        new RegExp(`s\\d+\\s*[-–—]\\s*s?${seasonStr}`, 'i'),
-        new RegExp(`stagion[ei]\\s*${seasonNum}\\s*[-–—]`, 'i'), // Stagione 27-XX
-        new RegExp(`season\\s*${seasonNum}\\s*[-–—]`, 'i'), // Season 27-XX
-        // Complete pack
-        new RegExp(`s${seasonStr}.*(?:completa|complete|full)`, 'i'),
-        new RegExp(`(?:completa|complete|full).*s${seasonStr}`, 'i')
-    ];
-    
-    const seasonPackMatch = seasonPackPatterns.some(pattern => pattern.test(normalizedTorrentTitle));
-    if (seasonPackMatch) {
-        console.log(`✅ [SEASON PACK] Match for "${torrentTitle}" contains Season ${seasonNum}`);
-        return true;
-    }
-    
-    console.log(`❌ No match for "${torrentTitle}" S${seasonStr}E${episodeStr}`);
-    return false;
+        
+    const matches = patterns.some(pattern => pattern.test(normalizedTorrentTitle));
+    console.log(`${matches ? '✅' : '❌'} Episode match for "${torrentTitle}" S${seasonStr}E${episodeStr}`);
+    return matches;
 }
 
 function isExactMovieMatch(torrentTitle, movieTitle, year) {
@@ -2374,17 +2122,7 @@ async function handleStream(type, id, config, workerOrigin) {
                 }
                 searchQueries.push(...uniqueQueries);
             } else { // Regular series search strategy
-                const seasonStr = String(season).padStart(2, '0');
-                const episodeStr = String(episode).padStart(2, '0');
-                
-                // ✅ STRATEGIA MODIFICATA: Prima cerca il titolo base per trovare MEGA PACK
-                // Questo risolve il problema di Il Corsaro Nero che ha "Stagione 1-34" invece di stagioni singole
-                
-                // 1. PRIORITÀ MASSIMA: Solo il titolo (trova pack multi-stagione)
-                searchQueries.push(mediaDetails.title);
-                
-                // 2. Query specifica per episodio (per torrent di episodi singoli)
-                let baseQuery = `${mediaDetails.title} S${seasonStr}E${episodeStr}`;
+                let baseQuery = `${mediaDetails.title} S${String(season).padStart(2, '0')}E${String(episode).padStart(2, '0')}`;
                 if (mediaDetails.tmdbId) {
                     const tvShowDetails = await getTVShowDetails(mediaDetails.tmdbId, season, episode, tmdbKey);
                     if (tvShowDetails && tvShowDetails.episodeTitle) {
@@ -2392,15 +2130,8 @@ async function handleStream(type, id, config, workerOrigin) {
                     }
                 }
                 searchQueries.push(baseQuery);
-                
-                // 3. Season pack con numero stagione (es: "Simpson S27")
-                searchQueries.push(`${mediaDetails.title} S${seasonStr}`);
-                
-                // 4. "Stagione XX" in italiano
-                searchQueries.push(`${mediaDetails.title} Stagione ${season}`);
-                
-                // 5. "Season XX" in inglese
-                searchQueries.push(`${mediaDetails.title} Season ${season}`);
+                searchQueries.push(`${mediaDetails.title} S${String(season).padStart(2, '0')}`);
+                searchQueries.push(mediaDetails.title);
             }
         } else { // Movie
             searchQueries.push(`${mediaDetails.title} ${mediaDetails.year}`);
@@ -2411,17 +2142,8 @@ async function handleStream(type, id, config, workerOrigin) {
         if (italianTitle) {
             console.log(`🇮🇹 Adding Italian title "${italianTitle}" to search queries.`);
             if (type === 'series' && !kitsuId) {
-                const seasonStr = String(season).padStart(2, '0');
-                const episodeStr = String(episode).padStart(2, '0');
-                
-                // ✅ PRIORITÀ: Titolo italiano da solo (per trovare mega pack)
-                searchQueries.unshift(italianTitle); // unshift = aggiungi all'inizio per priorità
-                
-                // Query specifiche con titolo italiano
-                searchQueries.push(`${italianTitle} S${seasonStr}E${episodeStr}`);
-                searchQueries.push(`${italianTitle} S${seasonStr}`);
-                searchQueries.push(`${italianTitle} Stagione ${season}`);
-                searchQueries.push(`${italianTitle} Season ${season}`);
+                searchQueries.push(`${italianTitle} S${String(season).padStart(2, '0')}`);
+                searchQueries.push(italianTitle);
             } else if (type === 'movie') {
                 searchQueries.push(`${italianTitle} ${mediaDetails.year}`);
                 searchQueries.push(italianTitle);
@@ -2431,14 +2153,7 @@ async function handleStream(type, id, config, workerOrigin) {
         if (originalTitle) {
             console.log(`🌍 Adding original title "${originalTitle}" to search queries.`);
             if (type === 'series' && !kitsuId) {
-                const seasonStr = String(season).padStart(2, '0');
-                const episodeStr = String(episode).padStart(2, '0');
-                
-                // Query specifiche con titolo originale
-                searchQueries.push(`${originalTitle} S${seasonStr}E${episodeStr}`);
-                searchQueries.push(`${originalTitle} S${seasonStr}`);
-                searchQueries.push(`${originalTitle} Stagione ${season}`);
-                searchQueries.push(`${originalTitle} Season ${season}`);
+                searchQueries.push(`${originalTitle} S${String(season).padStart(2, '0')}`);
                 searchQueries.push(originalTitle);
             } else if (type === 'movie') {
                 searchQueries.push(`${originalTitle} ${mediaDetails.year}`);
@@ -2729,17 +2444,6 @@ async function handleStream(type, id, config, workerOrigin) {
                 const qualityDisplay = result.quality ? result.quality.toUpperCase() : 'Unknown';
                 const qualitySymbol = getQualitySymbol(qualityDisplay);
                 const { icon: languageIcon } = getLanguageInfo(result.title, italianTitle);
-                
-                // ✅ Enhanced pack icon with episode info
-                let packIcon = '';
-                if (isSeasonPack(result.title)) {
-                    if (type === 'series' && season && episode) {
-                        packIcon = `📦[S${String(season).padStart(2, '0')}E${String(episode).padStart(2, '0')}] `;
-                    } else {
-                        packIcon = '📦 ';
-                    }
-                }
-                
                 const encodedConfig = btoa(JSON.stringify(config));
                 const infoHashLower = result.infoHash.toLowerCase();
                 
@@ -2773,7 +2477,7 @@ async function handleStream(type, id, config, workerOrigin) {
                     const streamName = [
                         cachedIcon + errorIcon + '🔵 ',
                         `[${result.source}]`,
-                        packIcon + languageIcon,  // ← Pack icon + Language icon
+                        languageIcon,
                         qualitySymbol,
                         qualityDisplay,
                         `👥 ${result.seeders || 0}/${result.leechers || 0}`,
@@ -2790,17 +2494,10 @@ async function handleStream(type, id, config, workerOrigin) {
                         cacheInfoText = '📥🧲 Aggiungi a Real-Debrid';
                     }
                     
-                    // ✅ Add season pack info for series
-                    let packInfo = '';
-                    if (isSeasonPack(result.title) && type === 'series' && season && episode) {
-                        packInfo = `\n📦 Pack completo - RD selezionerà automaticamente S${String(season).padStart(2, '0')}E${String(episode).padStart(2, '0')}`;
-                    }
-                    
                     const streamTitle = [
                         `🎬 ${result.title}`,
                         `📡 ${result.source} | 💾 ${result.size} | 👥 ${result.seeders || 0} seeds`,
                         cacheInfoText,
-                        packInfo,
                         result.categories?.[0] ? `📂 ${result.categories[0]}` : '',
                         debugInfo
                     ].filter(Boolean).join('\n');
@@ -2857,7 +2554,7 @@ async function handleStream(type, id, config, workerOrigin) {
                     const streamName = [
                         cachedIcon + errorIcon + '📦 ',
                         `[${result.source}]`,
-                        packIcon + languageIcon,  // ← Pack icon + Language icon
+                        languageIcon,
                         qualitySymbol,
                         qualityDisplay,
                         `👥 ${result.seeders || 0}/${result.leechers || 0}`,
@@ -2873,17 +2570,10 @@ async function handleStream(type, id, config, workerOrigin) {
                         cacheInfoText = '📥🧲 Aggiungi a Torbox';
                     }
                     
-                    // ✅ Add season pack info for series
-                    let packInfo = '';
-                    if (isSeasonPack(result.title) && type === 'series' && season && episode) {
-                        packInfo = `\n📦 Pack completo - Torbox selezionerà automaticamente S${String(season).padStart(2, '0')}E${String(episode).padStart(2, '0')}`;
-                    }
-                    
                     const streamTitle = [
                         `🎬 ${result.title}`,
                         `📡 ${result.source} | 💾 ${result.size} | 👥 ${result.seeders || 0} seeds`,
                         cacheInfoText,
-                        packInfo,
                         result.categories?.[0] ? `📂 ${result.categories[0]}` : '',
                     ].filter(Boolean).join('\n');
                     
@@ -2932,7 +2622,7 @@ async function handleStream(type, id, config, workerOrigin) {
                     const streamName = [
                         cachedIcon + errorIcon + '🅰️ ',
                         `[${result.source}]`,
-                        packIcon + languageIcon,  // ← Pack icon + Language icon
+                        languageIcon,
                         qualitySymbol,
                         qualityDisplay,
                         `👥 ${result.seeders || 0}/${result.leechers || 0}`,
@@ -2946,17 +2636,10 @@ async function handleStream(type, id, config, workerOrigin) {
                         cacheInfoText = '📥🧲 Aggiungi a AllDebrid';
                     }
                     
-                    // ✅ Add season pack info for series
-                    let packInfo = '';
-                    if (isSeasonPack(result.title) && type === 'series' && season && episode) {
-                        packInfo = `\n📦 Pack completo - AllDebrid selezionerà automaticamente S${String(season).padStart(2, '0')}E${String(episode).padStart(2, '0')}`;
-                    }
-                    
                     const streamTitle = [
                         `🎬 ${result.title}`,
                         `📡 ${result.source} | 💾 ${result.size} | 👥 ${result.seeders || 0} seeds`,
                         cacheInfoText,
-                        packInfo,
                         result.categories?.[0] ? `📂 ${result.categories[0]}` : '',
                     ].filter(Boolean).join('\n');
                     
@@ -2985,24 +2668,17 @@ async function handleStream(type, id, config, workerOrigin) {
                     const streamName = [
                         '[P2P]',
                         `[${result.source}]`,
-                        packIcon + languageIcon,  // ← Pack icon + Language icon
+                        languageIcon,
                         qualitySymbol,
                         qualityDisplay,
                         `👥 ${result.seeders || 0}/${result.leechers || 0}`,
                         result.size && result.size !== 'Unknown' ? `💾 ${result.size}` : null
                     ].filter(Boolean).join(' | ');
 
-                    // ✅ Add season pack info for series
-                    let packInfo = '';
-                    if (isSeasonPack(result.title) && type === 'series' && season && episode) {
-                        packInfo = `\n📦 Pack completo - Stremio scaricherà solo S${String(season).padStart(2, '0')}E${String(episode).padStart(2, '0')}`;
-                    }
-
                     const streamTitle = [
                         `🎬 ${result.title}`,
                         `📡 ${result.source} | 💾 ${result.size} | 👥 ${result.seeders || 0} seeds`,
                         '🔗 Link Magnet diretto (P2P)',
-                        packInfo,
                         result.categories?.[0] ? `📂 ${result.categories[0]}` : ''
                     ].filter(Boolean).join('\n');
 
@@ -3117,9 +2793,7 @@ async function handleStream(type, id, config, workerOrigin) {
 // ✅ TMDB helper functions (keeping existing but adding better error handling)
 async function getTMDBDetails(tmdbId, type = 'movie', tmdbApiKey, append = 'external_ids') {
     try {
-        // Convert 'series' to 'tv' for TMDB API
-        const tmdbType = type === 'series' ? 'tv' : type;
-        const response = await fetch(`${TMDB_BASE_URL}/${tmdbType}/${tmdbId}?api_key=${tmdbApiKey}&append_to_response=${append}`);
+        const response = await fetch(`${TMDB_BASE_URL}/${type}/${tmdbId}?api_key=${tmdbApiKey}&append_to_response=${append}`);
         if (!response.ok) throw new Error(`TMDB API error: ${response.status}`);
         return await response.json();
     } catch (error) {
@@ -3406,9 +3080,6 @@ export default async function handler(req, res) {
                 // STEP 3: Handle file selection if needed (like Torrentio _selectTorrentFiles)
                 if (torrent.status === 'waiting_files_selection') {
                     console.log(`[RealDebrid] Selecting files...`);
-                    
-                    // Note: /rd-stream/ endpoint doesn't have season/episode context
-                    // Smart episode matching only works in /stream/ endpoint
                     const videoExtensions = ['.mkv', '.mp4', '.avi', '.mov', '.wmv', '.flv', '.webm'];
                     const junkKeywords = ['sample', 'trailer', 'extra', 'bonus', 'extras'];
                     
@@ -3424,8 +3095,6 @@ export default async function handler(req, res) {
                         .sort((a, b) => b.bytes - a.bytes);
                     
                     const targetFile = videoFiles[0] || torrent.files.sort((a, b) => b.bytes - a.bytes)[0];
-                    console.log(`[RealDebrid] Using fallback: largest video file (no episode context)`);
-
                     
                     if (targetFile) {
                         await realdebrid.selectFiles(torrent.id, targetFile.id);
@@ -3445,13 +3114,10 @@ export default async function handler(req, res) {
                     // ✅ READY: Unrestrict and stream
                     console.log(`[RealDebrid] Torrent ready, unrestricting...`);
                     
-                    const selectedFiles = (torrent.files || []).filter(file => file.selected === 1);
-                    
-                    // Note: /rd-stream/ endpoint doesn't have season/episode context
-                    // Smart episode matching only works in /stream/ endpoint
                     const videoExtensions = ['.mkv', '.mp4', '.avi', '.mov', '.wmv', '.flv', '.webm'];
                     const junkKeywords = ['sample', 'trailer', 'extra', 'bonus', 'extras'];
                     
+                    const selectedFiles = (torrent.files || []).filter(file => file.selected === 1);
                     const videos = selectedFiles
                         .filter(file => {
                             const lowerPath = file.path.toLowerCase();
@@ -3647,8 +3313,6 @@ export default async function handler(req, res) {
                         console.log(`▶️ Torrent requires file selection. Selecting main video file...`);
                         if (!torrentInfo.files || torrentInfo.files.length === 0) throw new Error('Torrent is empty or invalid.');
                         
-                        // Note: /rd-add/ endpoint doesn't have season/episode info, so it uses fallback (largest file)
-                        // Smart episode matching only works in /rd-stream/ endpoint
                         const videoExtensions = ['.mkv', '.mp4', '.avi', '.mov', '.wmv', '.flv'];
                         const junkKeywords = ['sample', 'trailer', 'extra', 'bonus', 'extras'];
 
@@ -3702,8 +3366,6 @@ export default async function handler(req, res) {
                         if (torrentInfo.links.length === 1) {
                             downloadLink = torrentInfo.links[0];
                         } else {
-                            // Note: /rd-add/ endpoint doesn't have season/episode info, so it uses fallback (largest file)
-                            // Smart episode matching only works in /rd-stream/ endpoint
                             const videoExtensions = ['.mkv', '.mp4', '.avi', '.mov', '.wmv', '.flv'];
                             const junkKeywords = ['sample', 'trailer', 'extra', 'bonus', 'extras'];
                             const selectedVideoFiles = torrentInfo.files.filter(file => file.selected === 1 && videoExtensions.some(ext => file.path.toLowerCase().endsWith(ext)) && !junkKeywords.some(junk => file.path.toLowerCase().includes(junk)));
@@ -4219,43 +3881,21 @@ export default async function handler(req, res) {
                     // ✅ READY: Unrestrict and stream
                     console.log(`[Torbox] Torrent ready, unrestricting...`);
                     
-                    // 🎯 Try smart episode matching first (for series)
-                    // Note: Torbox files have {id, name, size} structure (different from RealDebrid)
-                    let targetVideo = null;
-                    if (type === 'series' && season && episode) {
-                        // Convert Torbox files to RealDebrid-like format for compatibility with findEpisodeFileInPack
-                        const filesForMatching = (torrent.files || []).map(f => ({
-                            path: f.name,
-                            bytes: f.size,
-                            id: f.id,
-                            selected: 1
-                        }));
-                        const matchedFile = findEpisodeFileInPack(filesForMatching, parseInt(season), parseInt(episode));
-                        if (matchedFile) {
-                            // Convert back to Torbox file format
-                            targetVideo = torrent.files.find(f => f.id === matchedFile.id);
-                        }
-                    }
+                    const videoExtensions = ['.mkv', '.mp4', '.avi', '.mov', '.wmv', '.flv'];
+                    const junkKeywords = ['sample', 'trailer', 'extra', 'bonus', 'extras'];
                     
-                    // Fallback to largest video if no episode match
-                    if (!targetVideo) {
-                        const videoExtensions = ['.mkv', '.mp4', '.avi', '.mov', '.wmv', '.flv'];
-                        const junkKeywords = ['sample', 'trailer', 'extra', 'bonus', 'extras'];
-                        
-                        const videos = (torrent.files || [])
-                            .filter(file => {
-                                const lowerName = file.name?.toLowerCase() || '';
-                                return videoExtensions.some(ext => lowerName.endsWith(ext));
-                            })
-                            .filter(file => {
-                                const lowerName = file.name?.toLowerCase() || '';
-                                return !junkKeywords.some(junk => lowerName.includes(junk)) || file.size > 250 * 1024 * 1024;
-                            })
-                            .sort((a, b) => b.size - a.size);
-                        
-                        targetVideo = videos[0];
-                        console.log(`[Torbox] Using fallback: largest video file`);
-                    }
+                    const videos = (torrent.files || [])
+                        .filter(file => {
+                            const lowerName = file.name?.toLowerCase() || '';
+                            return videoExtensions.some(ext => lowerName.endsWith(ext));
+                        })
+                        .filter(file => {
+                            const lowerName = file.name?.toLowerCase() || '';
+                            return !junkKeywords.some(junk => lowerName.includes(junk)) || file.size > 250 * 1024 * 1024;
+                        })
+                        .sort((a, b) => b.size - a.size);
+                    
+                    const targetVideo = videos[0];
                     
                     if (!targetVideo) {
                         if (torrent.files.every(file => file.name?.endsWith('.rar') || file.name?.endsWith('.zip'))) {
@@ -4364,6 +4004,9 @@ export default async function handler(req, res) {
                     // ✅ READY: Get files and unrestrict
                     console.log(`[AllDebrid] Magnet ready, getting files...`);
                     
+                    const videoExtensions = ['.mkv', '.mp4', '.avi', '.mov', '.wmv', '.flv', '.webm'];
+                    const junkKeywords = ['sample', 'trailer', 'extra', 'bonus', 'extras'];
+                    
                     // Extract files from magnetStatus
                     const files = magnetStatus.links || [];
                     
@@ -4372,45 +4015,21 @@ export default async function handler(req, res) {
                         return res.redirect(302, `${TORRENTIO_VIDEO_BASE}/videos/download_failed_v2.mp4`);
                     }
                     
-                    // 🎯 Try smart episode matching first (for series)
-                    // Note: AllDebrid files have {filename, link, size} structure
-                    let targetFile = null;
-                    if (type === 'series' && season && episode) {
-                        // Convert AllDebrid files to RealDebrid-like format for compatibility with findEpisodeFileInPack
-                        const filesForMatching = files.map(f => ({
-                            path: f.filename || f.link || '',
-                            bytes: f.size || 0,
-                            link: f.link
-                        }));
-                        const matchedFile = findEpisodeFileInPack(filesForMatching, parseInt(season), parseInt(episode));
-                        if (matchedFile) {
-                            // Find original file by link
-                            targetFile = files.find(f => f.link === matchedFile.link);
-                        }
-                    }
+                    // Find video files
+                    const videos = files
+                        .filter(file => {
+                            const filename = file.filename || file.link || '';
+                            return videoExtensions.some(ext => filename.toLowerCase().endsWith(ext));
+                        })
+                        .filter(file => {
+                            const filename = file.filename || file.link || '';
+                            const lowerName = filename.toLowerCase();
+                            const size = file.size || 0;
+                            return !junkKeywords.some(junk => lowerName.includes(junk)) || size > 250 * 1024 * 1024;
+                        })
+                        .sort((a, b) => (b.size || 0) - (a.size || 0));
                     
-                    // Fallback to largest video if no episode match
-                    if (!targetFile) {
-                        const videoExtensions = ['.mkv', '.mp4', '.avi', '.mov', '.wmv', '.flv', '.webm'];
-                        const junkKeywords = ['sample', 'trailer', 'extra', 'bonus', 'extras'];
-                        
-                        // Find video files
-                        const videos = files
-                            .filter(file => {
-                                const filename = file.filename || file.link || '';
-                                return videoExtensions.some(ext => filename.toLowerCase().endsWith(ext));
-                            })
-                            .filter(file => {
-                                const filename = file.filename || file.link || '';
-                                const lowerName = filename.toLowerCase();
-                                const size = file.size || 0;
-                                return !junkKeywords.some(junk => lowerName.includes(junk)) || size > 250 * 1024 * 1024;
-                            })
-                            .sort((a, b) => (b.size || 0) - (a.size || 0));
-                        
-                        targetFile = videos[0];
-                        console.log(`[AllDebrid] Using fallback: largest video file`);
-                    }
+                    const targetFile = videos[0];
                     
                     if (!targetFile) {
                         console.log(`[AllDebrid] No video file found`);
