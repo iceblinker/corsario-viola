@@ -1202,7 +1202,9 @@ class RealDebrid {
         if (!hashes || hashes.length === 0) return {};
         
         const results = {};
-        const batchSize = 40; // RD limit is 40 hashes per request
+        const batchSize = 40; // RD API limit: max 40 hashes per request
+        
+        console.log(`🔵 RD Cache check: ${hashes.length} hashes (${Math.ceil(hashes.length / batchSize)} batches)`);
         
         for (let i = 0; i < hashes.length; i += batchSize) {
             const batch = hashes.slice(i, i + batchSize);
@@ -1212,37 +1214,70 @@ class RealDebrid {
                 const response = await fetch(url, {
                     headers: {
                         'Authorization': `Bearer ${this.apiKey}`
-                    }
+                    },
+                    signal: AbortSignal.timeout(15000) // 15s timeout
                 });
-                const data = await response.json();
 
-                if (response.ok) {
+                if (!response.ok) {
+                    console.error(`❌ RD Cache API error: ${response.status} ${response.statusText}`);
+                    // Mark all batch as not cached on API error
                     batch.forEach(hash => {
-                        const hashLower = hash.toLowerCase();
-                        const cacheInfo = data[hashLower];
-                        
-                        // ✅ EXACT TORRENTIO LOGIC: Consider cached if RD has ANY variant available
-                        const isCached = cacheInfo && cacheInfo.rd && cacheInfo.rd.length > 0;
-                        
-                        results[hashLower] = {
-                            cached: isCached,  // Simple check like Torrentio
-                            downloadLink: null,  // Not needed, /rd-stream handles unrestricting
-                            service: 'Real-Debrid'
+                        results[hash.toLowerCase()] = { 
+                            cached: false, 
+                            variants: [],
+                            downloadLink: null, 
+                            service: 'Real-Debrid',
+                            error: `API Error ${response.status}`
                         };
                     });
+                    continue;
                 }
 
+                const data = await response.json();
+
+                batch.forEach(hash => {
+                    const hashLower = hash.toLowerCase();
+                    const cacheInfo = data[hashLower];
+                    
+                    // ✅ EXACT TORRENTIO LOGIC: Consider cached if RD has ANY variant available
+                    // Torrentio checks: cacheInfo && cacheInfo.rd && cacheInfo.rd.length > 0
+                    const variants = cacheInfo?.rd || [];
+                    const isCached = variants.length > 0;
+                    
+                    results[hashLower] = {
+                        cached: isCached,
+                        variants: variants,  // Array of available variants (each with files info)
+                        variantsCount: variants.length,  // Number of cached variants
+                        downloadLink: null,  // Not needed, /rd-stream handles unrestricting
+                        service: 'Real-Debrid'
+                    };
+                    
+                    if (isCached) {
+                        console.log(`✅ RD Cache HIT: ${hashLower.substring(0, 8)}... (${variants.length} variants)`);
+                    }
+                });
+
+                // Rate limiting: 500ms between batches to avoid API blocks
                 if (i + batchSize < hashes.length) {
                     await new Promise(resolve => setTimeout(resolve, 500));
                 }
             } catch (error) {
-                console.error('Cache check failed:', error);
+                console.error(`❌ RD Cache check failed for batch ${i / batchSize + 1}:`, error.message);
+                // Mark all batch as not cached on error
                 batch.forEach(hash => {
-                    const hashLower = hash.toLowerCase();
-                    results[hashLower] = { cached: false, downloadLink: null, service: 'Real-Debrid' };
+                    results[hash.toLowerCase()] = { 
+                        cached: false, 
+                        variants: [],
+                        downloadLink: null, 
+                        service: 'Real-Debrid',
+                        error: error.message
+                    };
                 });
             }
         }
+
+        const cachedCount = Object.values(results).filter(r => r.cached).length;
+        console.log(`🔵 RD Cache check complete: ${cachedCount}/${hashes.length} cached`);
 
         return results;
     }
@@ -2589,9 +2624,13 @@ async function handleStream(type, id, config, workerOrigin) {
                     // The endpoint will handle: global cache, personal cache, or add new torrent
                     streamUrl = `${workerOrigin}/rd-stream/${encodedConfig}/${encodeURIComponent(result.magnetLink)}`;
                     
-                    if (rdCacheData?.cached && rdCacheData.downloadLink) {
+                    // ✅ TORRENTIO LOGIC: Check if ANY variant is cached (variants.length > 0)
+                    // rdCacheData.cached is true when variants.length > 0
+                    // rdCacheData.variants contains array of available file groups
+                    if (rdCacheData?.cached && rdCacheData.variants && rdCacheData.variants.length > 0) {
                         cacheType = 'global';
-                        console.log(`🔵 ⚡ RD GLOBAL cache available: ${result.title}`);
+                        const variantInfo = rdCacheData.variantsCount > 1 ? ` (${rdCacheData.variantsCount} variants)` : '';
+                        console.log(`🔵 ⚡ RD GLOBAL cache available: ${result.title}${variantInfo}`);
                     } else if (rdUserTorrent && rdUserTorrent.status === 'downloaded') {
                         cacheType = 'personal';
                         console.log(`🔵 👤 Found in RD PERSONAL cache: ${result.title}`);
@@ -2616,11 +2655,14 @@ async function handleStream(type, id, config, workerOrigin) {
                     const debugInfo = streamError ? `\n⚠️ Stream error: ${streamError}` : '';
                     let cacheInfoText;
                     if (cacheType === 'global') {
-                        cacheInfoText = '🔗 Streaming da cache Globale Real-Debrid';
+                        const variantInfo = rdCacheData?.variantsCount > 1 
+                            ? ` (${rdCacheData.variantsCount} varianti disponibili)` 
+                            : '';
+                        cacheInfoText = `🔗 Streaming da cache Globale Real-Debrid${variantInfo}`;
                     } else if (cacheType === 'personal') {
                         cacheInfoText = '🔗 Streaming da cache Personale Real-Debrid';
                     } else {
-                        cacheInfoText = '📥🧲 Aggiungi a Real-Debrid';
+                        cacheInfoText = '📥🧲 Aggiungi a Real-Debrid (download necessario)';
                     }
                     
                     const streamTitle = [
