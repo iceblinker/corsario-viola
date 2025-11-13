@@ -246,6 +246,7 @@ async function fetchCorsaroNeroSingle(searchQuery, type = 'movie') {
 
     try {
         // Definisce le categorie da accettare in base al tipo
+        // Le categorie nel sito sono: "Film", "Serie TV", "Animazione - Film", "Animazione - Serie", "Musica - Audio", etc.
         let acceptedCategories;
         let outputCategory;
         switch (type) {
@@ -289,25 +290,21 @@ async function fetchCorsaroNeroSingle(searchQuery, type = 'movie') {
         
         // Filtra le righe in base alla categoria
         const filteredRows = rows.toArray().filter((row) => {
-            const categoryElement = $(row).find('td:first-child span');
-            if (!categoryElement.length) {
-                console.log(`🏴‍☠️   - Row has no category element`);
+            // Estrai la categoria dalla prima colonna
+            const firstTd = $(row).find('td').first();
+            const categorySpan = firstTd.find('span');
+            const category = categorySpan.length > 0 
+                ? categorySpan.text().trim().toLowerCase() 
+                : firstTd.text().trim().toLowerCase();
+            
+            if (!category) {
                 return false;
             }
             
-            const category = categoryElement.text().trim().toLowerCase();
-            console.log(`🏴‍☠️   - Found category: "${category}"`);
-            
-            const isAccepted = acceptedCategories.some(acceptedCat => {
-                const match = category === acceptedCat;
-                console.log(`🏴‍☠️     Comparing "${category}" === "${acceptedCat}": ${match}`);
-                return match;
-            });
+            const isAccepted = acceptedCategories.includes(category);
             
             if (!isAccepted) {
-                console.log(`🏴‍☠️   - ❌ Skipping category: "${category}"`);
-            } else {
-                console.log(`🏴‍☠️   - ✅ Accepted category: "${category}"`);
+                console.log(`🏴‍☠️   - Skipping category: "${category}"`);
             }
             
             return isAccepted;
