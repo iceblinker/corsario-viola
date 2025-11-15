@@ -262,6 +262,49 @@ async function updateRdCacheStatus(cacheResults) {
 }
 
 /**
+ * Get cached RD availability for hashes (within 5 days)
+ * @param {Array} hashes - Array of info hashes
+ * @returns {Promise<Object>} Map of hash -> {cached: boolean, lastCheck: Date}
+ */
+async function getRdCachedAvailability(hashes) {
+  if (!pool) throw new Error('Database not initialized');
+  if (!hashes || hashes.length === 0) return {};
+  
+  try {
+    const lowerHashes = hashes.map(h => h.toLowerCase());
+    
+    // Get cached results that are less than 5 days old
+    const query = `
+      SELECT info_hash, cached_rd, last_cached_check
+      FROM torrents
+      WHERE info_hash = ANY($1)
+        AND cached_rd IS NOT NULL
+        AND last_cached_check IS NOT NULL
+        AND last_cached_check > NOW() - INTERVAL '5 days'
+    `;
+    
+    const result = await pool.query(query, [lowerHashes]);
+    
+    const cachedMap = {};
+    result.rows.forEach(row => {
+      cachedMap[row.info_hash] = {
+        cached: row.cached_rd,
+        lastCheck: row.last_cached_check,
+        fromCache: true
+      };
+    });
+    
+    console.log(`💾 [DB] Found ${result.rows.length}/${hashes.length} hashes with valid RD cache (< 5 days)`);
+    
+    return cachedMap;
+    
+  } catch (error) {
+    console.error(`❌ [DB] Error getting RD cached availability:`, error.message);
+    return {};
+  }
+}
+
+/**
  * Close database connection
  */
 async function closeDatabase() {
@@ -279,5 +322,6 @@ module.exports = {
   searchEpisodeFiles,
   insertTorrent,
   updateRdCacheStatus,
+  getRdCachedAvailability,
   closeDatabase
 };
