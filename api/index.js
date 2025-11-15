@@ -1927,7 +1927,50 @@ async function getTMDBDetailsByImdb(imdbId, tmdbApiKey) {
     }
 }
 
-// 🔥 NEW: Background CorsaroNero enrichment - populates DB without blocking user response
+// 🔥 NEW: Save CorsaroNero results we already found (no additional search needed!)
+async function saveCorsaroResultsToDB(corsaroResults, mediaDetails, type, dbHelper) {
+    try {
+        console.log(`💾 [DB Save] Saving ${corsaroResults.length} CorsaroNero results...`);
+        
+        const torrentsToInsert = [];
+        for (const result of corsaroResults) {
+            if (!result.infoHash || result.infoHash.length < 32) {
+                console.log(`⚠️ [DB Save] Skipping invalid hash: ${result.title}`);
+                continue;
+            }
+            
+            // Extract IMDB ID from title if available
+            const imdbMatch = result.title.match(/tt\d{7,8}/i);
+            const imdbId = imdbMatch ? imdbMatch[0] : (mediaDetails.imdbId || null);
+            
+            torrentsToInsert.push({
+                info_hash: result.infoHash.toLowerCase(),
+                provider: 'CorsaroNero',
+                title: result.title,
+                size: result.sizeInBytes || 0,
+                type: type,
+                upload_date: new Date().toISOString(),
+                seeders: result.seeders || 0,
+                imdb_id: imdbId,
+                tmdb_id: mediaDetails.tmdbId || null,
+                cached_rd: null,
+                last_cached_check: null,
+                file_index: null
+            });
+        }
+        
+        if (torrentsToInsert.length > 0) {
+            const insertedCount = await dbHelper.batchInsertTorrents(torrentsToInsert);
+            console.log(`✅ [DB Save] Inserted ${insertedCount}/${torrentsToInsert.length} new torrents`);
+        } else {
+            console.log(`⚠️ [DB Save] No valid torrents to insert`);
+        }
+    } catch (error) {
+        console.error(`❌ [DB Save] Error:`, error);
+    }
+}
+
+// 🔥 OLD: Background CorsaroNero enrichment - populates DB without blocking user response
 async function enrichDatabaseInBackground(mediaDetails, type, season = null, episode = null, dbHelper) {
     try {
         console.log(`🔄 [Background] Starting CorsaroNero enrichment for: ${mediaDetails.title}`);
@@ -1960,16 +2003,24 @@ async function enrichDatabaseInBackground(mediaDetails, type, season = null, epi
             try {
                 const tmdbType = type === 'series' ? 'tv' : 'movie';
                 const tmdbKey = process.env.TMDB_KEY || '5462f78469f3d80bf520164529.4c16e4';
+                console.log(`🔄 [Background] Using TMDb key: ${tmdbKey.substring(0, 10)}... Type: ${tmdbType}`);
                 
                 // 1. Get ITALIAN title (language=it-IT)
                 const italianUrl = `https://api.themoviedb.org/3/${tmdbType}/${mediaDetails.tmdbId}?api_key=${tmdbKey}&language=it-IT`;
+                console.log(`🔄 [Background] Fetching Italian title from: ${italianUrl.replace(tmdbKey, 'HIDDEN')}`);
                 const italianResponse = await fetch(italianUrl);
+                console.log(`🔄 [Background] Italian response status: ${italianResponse.status}`);
                 if (italianResponse.ok) {
                     const italianData = await italianResponse.json();
                     italianTitle = italianData.title || italianData.name;
+                    console.log(`🔄 [Background] Italian data received. Title field: ${italianData.title}, Name field: ${italianData.name}`);
                     if (italianTitle && italianTitle !== mediaDetails.title) {
                         console.log(`🇮🇹 [Background] Found Italian title: "${italianTitle}"`);
+                    } else {
+                        console.log(`⚠️ [Background] Italian title same as English or null: "${italianTitle}"`);
                     }
+                } else {
+                    console.error(`❌ [Background] Italian title fetch failed: ${italianResponse.status} ${italianResponse.statusText}`);
                 }
                 
                 // 2. Get ORIGINAL title (no language param = original language)
@@ -3487,14 +3538,23 @@ async function handleStream(type, id, config, workerOrigin) {
         console.log(`🎉 Successfully processed ${streams.length} streams in ${totalTime}ms`);
         console.log(`⚡ ${cachedCount} cached streams available for instant playback`);
         
-        // 🔥 BACKGROUND TASK: Enrich database with CorsaroNero results (non-blocking)
+        // 🔥 BACKGROUND TASK: Save CorsaroNero results to DB (use results we already have!)
         console.log(`🔍 [Background Check] dbEnabled=${dbEnabled}, mediaDetails=${!!mediaDetails}, tmdbId=${mediaDetails?.tmdbId}, imdbId=${mediaDetails?.imdbId}`);
         
         if (dbEnabled && mediaDetails && (mediaDetails.tmdbId || mediaDetails.imdbId)) {
-            console.log(`🚀 [Background] Triggering enrichment for: ${mediaDetails.title}`);
-            enrichDatabaseInBackground(mediaDetails, type, season, episode, dbHelper).catch(err => {
-                console.warn(`⚠️ [Background] Enrichment failed (non-critical):`, err.message);
-            });
+            // Filter only CorsaroNero results from the results we already found
+            const corsaroResults = results.filter(r => r.provider === 'CorsaroNero');
+            console.log(`🚀 [Background] Saving ${corsaroResults.length} CorsaroNero results to DB`);
+            
+            if (corsaroResults.length > 0) {
+                setImmediate(async () => {
+                    try {
+                        await saveCorsaroResultsToDB(corsaroResults, mediaDetails, type, dbHelper);
+                    } catch (err) {
+                        console.warn(`⚠️ [Background] DB save failed (non-critical):`, err.message);
+                    }
+                });
+            }
         } else {
             console.log(`⏭️  [Background] Enrichment skipped (dbEnabled=${dbEnabled}, hasMediaDetails=${!!mediaDetails}, hasIds=${!!(mediaDetails?.tmdbId || mediaDetails?.imdbId)})`);
         }
