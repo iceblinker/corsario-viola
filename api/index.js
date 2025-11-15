@@ -3059,12 +3059,13 @@ async function handleStream(type, id, config, workerOrigin) {
                         cacheInfoText = '📥🧲 Aggiungi a Real-Debrid (download necessario)';
                     }
                     
-                    // 🔥 Torrentio-style: Show "Pack Name / File Name" for series with fileIndex
+                    // 🔥 Show "Pack Name / Episode Title" for series (user-friendly)
                     let displayTitle = result.title;
-                    if (type === 'series' && season && episode && result.filename && result.fileIndex) {
-                        // Extract just the filename (remove path)
-                        const fileName = result.filename.split('/').pop().split('\\').pop();
-                        displayTitle = `${result.title}\n📂 ${fileName}`;
+                    if (type === 'series' && season && episode && mediaDetails) {
+                        const seasonStr = String(season).padStart(2, '0');
+                        const episodeStr = String(episode).padStart(2, '0');
+                        const episodeTitle = `${mediaDetails.title} S${seasonStr}E${episodeStr}`;
+                        displayTitle = `${result.title}\n📂 ${episodeTitle}`;
                     }
                     
                     const streamTitle = [
@@ -3143,11 +3144,13 @@ async function handleStream(type, id, config, workerOrigin) {
                         cacheInfoText = '📥🧲 Aggiungi a Torbox';
                     }
                     
-                    // 🔥 Torrentio-style: Show "Pack Name / File Name" for series with fileIndex
+                    // 🔥 Show "Pack Name / Episode Title" for series (user-friendly)
                     let displayTitle = result.title;
-                    if (type === 'series' && season && episode && result.filename && result.fileIndex) {
-                        const fileName = result.filename.split('/').pop().split('\\').pop();
-                        displayTitle = `${result.title}\n📂 ${fileName}`;
+                    if (type === 'series' && season && episode && mediaDetails) {
+                        const seasonStr = String(season).padStart(2, '0');
+                        const episodeStr = String(episode).padStart(2, '0');
+                        const episodeTitle = `${mediaDetails.title} S${seasonStr}E${episodeStr}`;
+                        displayTitle = `${result.title}\n📂 ${episodeTitle}`;
                     }
                     
                     const streamTitle = [
@@ -3216,11 +3219,13 @@ async function handleStream(type, id, config, workerOrigin) {
                         cacheInfoText = '📥🧲 Aggiungi a AllDebrid';
                     }
                     
-                    // 🔥 Torrentio-style: Show "Pack Name / File Name" for series with fileIndex
+                    // 🔥 Show "Pack Name / Episode Title" for series (user-friendly)
                     let displayTitle = result.title;
-                    if (type === 'series' && season && episode && result.filename && result.fileIndex) {
-                        const fileName = result.filename.split('/').pop().split('\\').pop();
-                        displayTitle = `${result.title}\n📂 ${fileName}`;
+                    if (type === 'series' && season && episode && mediaDetails) {
+                        const seasonStr = String(season).padStart(2, '0');
+                        const episodeStr = String(episode).padStart(2, '0');
+                        const episodeTitle = `${mediaDetails.title} S${seasonStr}E${episodeStr}`;
+                        displayTitle = `${result.title}\n📂 ${episodeTitle}`;
                     }
                     
                     const streamTitle = [
@@ -3680,28 +3685,28 @@ export default async function handler(req, res) {
                 
                 console.log(`[RealDebrid] Resolving ${infoHash}`);
                 
-                // 🔥 STEP 0: Check if torrent already exists (Torrentio-style reuse)
-                const existingTorrent = await realdebrid._findExistingTorrent(infoHash);
+                // 🔥 NO TORRENT REUSE - Always add fresh to avoid wrong episode selection
                 let torrentId;
                 
-                if (existingTorrent && existingTorrent.status !== 'error') {
-                    torrentId = existingTorrent.id;
-                    console.log(`♻️ [RD] Using existing torrent: ${torrentId} (status: ${existingTorrent.status})`);
-                } else {
-                    // STEP 1: Add magnet (RD will use cache if available)
-                    console.log(`[RealDebrid] Adding new magnet...`);
-                    try {
-                        const addResponse = await realdebrid.addMagnet(magnetLink);
-                        torrentId = addResponse.id;
-                    } catch (addError) {
-                        // 🔥 Torrentio-style retry on failure
-                        if (addError.error_code === 19) { // Hoster unavailable
-                            console.warn(`⚠️ [RD] Hoster unavailable (error 19), retrying...`);
-                            const retryResponse = await realdebrid._retryCreateTorrent(infoHash, magnetLink);
-                            torrentId = retryResponse.id;
-                        } else {
-                            throw addError;
+                // STEP 1: Add magnet (RD will use cache if available)
+                console.log(`[RealDebrid] Adding new magnet (no reuse)...`);
+                try {
+                    const addResponse = await realdebrid.addMagnet(magnetLink);
+                    torrentId = addResponse.id;
+                } catch (addError) {
+                    // 🔥 Handle error 19: torrent already exists
+                    if (addError.error_code === 19) {
+                        console.log(`[RealDebrid] Torrent already exists, deleting and re-adding for fresh file selection...`);
+                        const existingTorrent = await realdebrid._findExistingTorrent(infoHash);
+                        if (existingTorrent) {
+                            await realdebrid.deleteTorrent(existingTorrent.id);
+                            console.log(`[RealDebrid] Deleted old torrent ${existingTorrent.id}`);
                         }
+                        // Retry add
+                        const retryResponse = await realdebrid.addMagnet(magnetLink);
+                        torrentId = retryResponse.id;
+                    } else {
+                        throw addError;
                     }
                 }
                 
