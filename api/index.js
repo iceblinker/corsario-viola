@@ -2677,36 +2677,20 @@ async function handleStream(type, id, config, workerOrigin) {
             console.log('🔵 Checking Real-Debrid cache...');
             cacheChecks.push(
                 (async () => {
-                    // STEP 1: Check DB cache first (Torrentio-style)
+                    // ⚠️ instantAvailability is DISABLED by RealDebrid (error_code 37)
+                    // Strategy: Use DB cache (5-day TTL) + mark as cached on successful unrestrict
+                    
+                    // STEP 1: Check DB cache for known cached torrents (< 5 days)
                     let dbCachedResults = {};
                     if (dbEnabled) {
                         dbCachedResults = await dbHelper.getRdCachedAvailability(hashes);
-                        console.log(`💾 [DB Cache] ${Object.keys(dbCachedResults).length}/${hashes.length} hashes found in cache`);
+                        console.log(`💾 [DB Cache] ${Object.keys(dbCachedResults).length}/${hashes.length} hashes found in cache (< 5 days)`);
                     }
                     
-                    // STEP 2: Find hashes NOT in cache (need API call)
-                    const uncachedHashes = hashes.filter(h => !dbCachedResults[h.toLowerCase()]);
+                    // STEP 2: Set DB cached results
+                    rdCacheResults = dbCachedResults;
                     
-                    // STEP 3: Call instantAvailability ONLY for uncached hashes
-                    let apiResults = {};
-                    if (uncachedHashes.length > 0) {
-                        console.log(`🔵 Calling RD API for ${uncachedHashes.length} uncached hashes...`);
-                        apiResults = await rdService.checkCache(uncachedHashes);
-                        
-                        // STEP 4: Save API results to DB for future use
-                        if (dbEnabled && Object.keys(apiResults).length > 0) {
-                            const cacheUpdates = Object.entries(apiResults).map(([hash, data]) => ({
-                                hash: hash,
-                                cached: data.cached || false
-                            }));
-                            await dbHelper.updateRdCacheStatus(cacheUpdates);
-                        }
-                    }
-                    
-                    // STEP 5: Merge DB cache + API results
-                    rdCacheResults = { ...dbCachedResults, ...apiResults };
-                    
-                    // STEP 6: Get user torrents (personal cache)
+                    // STEP 3: Get user torrents (personal cache - already added to RD account)
                     rdUserTorrents = await rdService.getTorrents().catch(e => {
                         console.error("⚠️ Failed to fetch RD user torrents.", e.message);
                         return [];
@@ -3354,6 +3338,15 @@ export default async function handler(req, res) {
             const encodedMagnet = pathParts[3];
             const workerOrigin = url.origin;
             
+            // Initialize database for cache tracking
+            let dbEnabled = false;
+            try {
+                dbHelper.initDatabase();
+                dbEnabled = true;
+            } catch (error) {
+                console.warn('⚠️ [DB] Failed to initialize database for /rd-stream/');
+            }
+            
             const htmlResponse = (title, message, isError = false) => `
                 <!DOCTYPE html><html lang="it"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>${title}</title>
                 <style>body{font-family:sans-serif;background-color:#1E1E1E;color:#E0E0E0;display:flex;justify-content:center;align-items:center;height:100vh;margin:0;text-align:center;padding:1em;} .container{max-width:90%;padding:2em;background-color:#2A2A2A;border-radius:8px;box-shadow:0 4px 8px rgba(0,0,0,0.3);} h1{color:${isError ? '#FF6B6B' : '#4EC9B0'};}</style>
@@ -3465,6 +3458,16 @@ export default async function handler(req, res) {
                     }
                     
                     const unrestricted = await realdebrid.unrestrictLink(downloadLink);
+                    
+                    // ✅ CACHE SUCCESS: Mark torrent as cached in DB (5-day TTL)
+                    if (dbEnabled && infoHash) {
+                        try {
+                            await dbHelper.updateRdCacheStatus([{ hash: infoHash, cached: true }]);
+                            console.log(`💾 [DB] Marked ${infoHash} as RD cached (5-day TTL)`);
+                        } catch (dbErr) {
+                            console.warn(`⚠️ Failed to update DB cache status: ${dbErr.message}`);
+                        }
+                    }
                     
                     // Check if it's a RAR archive
                     if (unrestricted.download?.endsWith('.rar') || unrestricted.download?.endsWith('.zip')) {
@@ -3696,6 +3699,16 @@ export default async function handler(req, res) {
 
                         const unrestricted = await realdebrid.unrestrictLink(downloadLink);
                         let finalStreamUrl = unrestricted.download;
+                        
+                        // ✅ CACHE SUCCESS: Mark torrent as cached in DB (5-day TTL)
+                        if (dbEnabled && infoHash) {
+                            try {
+                                await dbHelper.updateRdCacheStatus([{ hash: infoHash, cached: true }]);
+                                console.log(`💾 [DB] Marked ${infoHash} as RD cached (5-day TTL)`);
+                            } catch (dbErr) {
+                                console.warn(`⚠️ Failed to update DB cache status: ${dbErr.message}`);
+                            }
+                        }
                         
                         // Apply MediaFlow proxy if configured
                         if (userConfig.mediaflow_url && userConfig.mediaflow_password) {
