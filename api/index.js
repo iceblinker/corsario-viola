@@ -1943,6 +1943,8 @@ async function saveCorsaroResultsToDB(corsaroResults, mediaDetails, type, dbHelp
             const imdbMatch = result.title.match(/tt\d{7,8}/i);
             const imdbId = imdbMatch ? imdbMatch[0] : (mediaDetails.imdbId || null);
             
+            console.log(`💾 [DB Save] Processing: ${result.title} - Size: ${result.size} (${result.sizeInBytes} bytes), Seeders: ${result.seeders}`);
+            
             torrentsToInsert.push({
                 info_hash: result.infoHash.toLowerCase(),
                 provider: 'CorsaroNero',
