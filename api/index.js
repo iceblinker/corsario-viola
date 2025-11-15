@@ -1421,10 +1421,23 @@ class RealDebrid {
             body: formData
         });
 
-        if (response.status !== 204) {
-            const errorData = await response.json().catch(() => ({}));
-            throw new Error(`Failed to select files on Real-Debrid: ${response.status} - ${errorData.error || 'Unknown error'}`);
+        // Status 204 = success
+        if (response.status === 204) {
+            return;
         }
+        
+        // Status 202 with "action_already_done" = files already selected, treat as success
+        if (response.status === 202) {
+            const errorData = await response.json().catch(() => ({}));
+            if (errorData.error === 'action_already_done') {
+                console.log('ℹ️ [RD] Files already selected (202 action_already_done), continuing...');
+                return;
+            }
+        }
+        
+        // Any other status = error
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(`Failed to select files on Real-Debrid: ${response.status} - ${errorData.error || 'Unknown error'}`);
     }
 
     async getTorrentInfo(torrentId) {
@@ -2426,9 +2439,12 @@ function isExactEpisodeMatch(torrentTitle, showTitleOrTitles, seasonNum, episode
     if (seasonRangeMatch) {
         const startSeason = parseInt(seasonRangeMatch[1]);
         const endSeason = parseInt(seasonRangeMatch[2]);
+        console.log(`🔍 [MULTI-SEASON CHECK] "${torrentTitle}" has range S${startSeason}-S${endSeason}, checking if Season ${seasonNum} is included...`);
         if (seasonNum >= startSeason && seasonNum <= endSeason) {
             console.log(`✅ [MULTI-SEASON RANGE] Match for "${torrentTitle}" S${startSeason}-S${endSeason} contains Season ${seasonNum}`);
             return true;
+        } else {
+            console.log(`❌ [MULTI-SEASON RANGE] Season ${seasonNum} is NOT in range S${startSeason}-S${endSeason}`);
         }
     }
     
