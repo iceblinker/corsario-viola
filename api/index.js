@@ -4010,6 +4010,57 @@ export default async function handler(req, res) {
                                             console.log(`[RealDebrid] 📦 Selecting all ${allVideoFiles.length} video files`);
                                             await realdebrid.selectFiles(convertedTorrent.id, allVideoIds);
                                             
+                                            // ✅ SAVE FILE INFO: Save ALL files from the pack NOW (before redirect)
+                                            if (dbEnabled && infoHash) {
+                                                try {
+                                                    const episodeImdbId = await dbHelper.getImdbIdByHash(infoHash);
+                                                    
+                                                    if (episodeImdbId) {
+                                                        console.log(`💾 [DB] Saving ALL ${allVideoFiles.length} files from re-added pack...`);
+                                                        
+                                                        for (const file of allVideoFiles) {
+                                                            const filename = file.path.split('/').pop();
+                                                            const episodeMatch = filename.match(/[se](\d{1,2})[ex](\d{1,2})|stagione[\s._-]*(\d{1,2})[\s._-]*episodio[\s._-]*(\d{1,2})|(\d{1,2})x(\d{1,2})/i);
+                                                            
+                                                            if (episodeMatch) {
+                                                                let fileSeason, fileEpisode;
+                                                                if (episodeMatch[1] && episodeMatch[2]) {
+                                                                    fileSeason = parseInt(episodeMatch[1]);
+                                                                    fileEpisode = parseInt(episodeMatch[2]);
+                                                                } else if (episodeMatch[3] && episodeMatch[4]) {
+                                                                    fileSeason = parseInt(episodeMatch[3]);
+                                                                    fileEpisode = parseInt(episodeMatch[4]);
+                                                                } else if (episodeMatch[5] && episodeMatch[6]) {
+                                                                    fileSeason = parseInt(episodeMatch[5]);
+                                                                    fileEpisode = parseInt(episodeMatch[6]);
+                                                                }
+                                                                
+                                                                if (fileSeason === parseInt(season)) {
+                                                                    const fileInfo = {
+                                                                        imdbId: episodeImdbId,
+                                                                        season: fileSeason,
+                                                                        episode: fileEpisode
+                                                                    };
+                                                                    
+                                                                    await dbHelper.updateTorrentFileInfo(
+                                                                        infoHash,
+                                                                        file.id,
+                                                                        file.path,
+                                                                        fileInfo
+                                                                    );
+                                                                    
+                                                                    console.log(`💾 [DB] Saved S${String(fileSeason).padStart(2, '0')}E${String(fileEpisode).padStart(2, '0')}: ${filename}`);
+                                                                }
+                                                            }
+                                                        }
+                                                        
+                                                        console.log(`✅ [DB] Finished saving all files from re-added pack`);
+                                                    }
+                                                } catch (fileErr) {
+                                                    console.error(`❌ [DB] Error saving pack files: ${fileErr.message}`);
+                                                }
+                                            }
+                                            
                                             // Redirect to same URL to restart the flow
                                             console.log(`[RealDebrid] 🔄 Reloading stream with all files selected...`);
                                             return res.redirect(302, req.url);
