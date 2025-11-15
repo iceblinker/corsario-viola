@@ -4002,15 +4002,26 @@ export default async function handler(req, res) {
                         return res.redirect(302, `${TORRENTIO_VIDEO_BASE}/videos/download_failed_v2.mp4`);
                     }
                     
-                    // Find the link for the target file
-                    const filename = targetFile.path.split('/').pop();
-                    let downloadLink = (torrent.links || []).find(link => decodeURIComponent(link).endsWith(filename));
-                    if (!downloadLink) downloadLink = torrent.links[0]; // Fallback
+                    // 🔥 CRITICAL FIX: Use file.id to get the correct link!
+                    // RealDebrid returns links[] array matching files[] order, not by filename
+                    // We need to find which position our targetFile is in the files array
+                    const fileIndex = (torrent.files || []).findIndex(f => f.id === targetFile.id);
                     
-                    if (!downloadLink) {
-                        console.log(`[RealDebrid] No download link found`);
+                    if (fileIndex === -1) {
+                        console.log(`[RealDebrid] ❌ Could not find file index for file.id=${targetFile.id}`);
                         return res.redirect(302, `${TORRENTIO_VIDEO_BASE}/videos/download_failed_v2.mp4`);
                     }
+                    
+                    console.log(`[RealDebrid] 📍 File ID: ${targetFile.id}, Array Index: ${fileIndex}, Total links: ${(torrent.links || []).length}`);
+                    
+                    let downloadLink = torrent.links[fileIndex];
+                    
+                    if (!downloadLink) {
+                        console.log(`[RealDebrid] ❌ No download link at index ${fileIndex}`);
+                        return res.redirect(302, `${TORRENTIO_VIDEO_BASE}/videos/download_failed_v2.mp4`);
+                    }
+                    
+                    console.log(`[RealDebrid] ✅ Using link at index ${fileIndex} for file: ${targetFile.path.split('/').pop()}`);
                     
                     const unrestricted = await realdebrid.unrestrictLink(downloadLink);
                     
