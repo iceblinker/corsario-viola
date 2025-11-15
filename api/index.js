@@ -1963,7 +1963,7 @@ async function enrichDatabaseInBackground(mediaDetails, type, season = null, epi
         for (const query of searchQueries) {
             try {
                 console.log(`🔄 [Background] Searching CorsaroNero for: "${query}"`);
-                const results = await searchCorsaroNero(query.trim());
+                const results = await fetchCorsaroNeroData(query.trim(), type);
                 corsaroResults.push(...results);
                 console.log(`🔄 [Background] CorsaroNero: ${results.length} results for "${query}"`);
             } catch (error) {
@@ -2254,17 +2254,36 @@ function isExactEpisodeMatch(torrentTitle, showTitleOrTitles, seasonNum, episode
     // Es: "Simpson Stagione 27", "Simpson S27", "Simpson Season 27 Complete"
     const seasonPackPatterns = [
         // Italiano
-        new RegExp(`stagione\\s*${seasonNum}`, 'i'),
-        new RegExp(`stagione\\s*${seasonStr}`, 'i'),
+        new RegExp(`stagione\\s*${seasonNum}(?!\\d)`, 'i'),
+        new RegExp(`stagione\\s*${seasonStr}(?!\\d)`, 'i'),
         // Inglese
-        new RegExp(`season\\s*${seasonNum}\\b`, 'i'),
-        new RegExp(`season\\s*${seasonStr}\\b`, 'i'),
-        // Formato compatto
-        new RegExp(`\\bs${seasonStr}\\b(?!e)`, 'i'), // S27 ma non S27E
-        new RegExp(`\\bs${seasonNum}\\b(?!e)`, 'i'), // S27 ma non S27E
-        // Complete pack
-        new RegExp(`s${seasonStr}.*(?:completa|complete|full)`, 'i'),
-        new RegExp(`(?:completa|complete|full).*s${seasonStr}`, 'i')
+        new RegExp(`season\\s*${seasonNum}(?!\\d)`, 'i'),
+        new RegExp(`season\\s*${seasonStr}(?!\\d)`, 'i'),
+        // Formato compatto S01 o S1
+        // Dopo normalizzazione: "S01.1080p" → "s011080p", "S01.ITA" → "s01ita"
+        // Pattern intelligente: riconosce resolution (480-2160p), anni (1900-2099), parole (ita/eng/complete)
+        new RegExp(
+            `s${seasonStr}(?:` +
+            `(?:480|720|1080|1440|2160)p?|` +  // Resolution comuni
+            `(?:19|20)\\d{2}|` +                // Anno
+            `[a-z]{2,}|` +                      // Parola (ita, eng, multi, complete, etc.)
+            `\\s|$` +                           // Spazio o fine stringa
+            `)`,
+            'i'
+        ),
+        // S1 (single digit) - stesso approccio ma evita S1E
+        new RegExp(
+            `s0*${seasonNum}(?:` +
+            `(?:480|720|1080|1440|2160)p?|` +
+            `(?:19|20)\\d{2}|` +
+            `[a-z]{2,}|` +
+            `\\s|$` +
+            `)(?!e)`,  // NON seguito da 'e' (evita S1E)
+            'i'
+        ),
+        // Complete pack con keywords
+        new RegExp(`s${seasonStr}.*(?:completa|complete|full|series)`, 'i'),
+        new RegExp(`(?:completa|complete|full|series).*s${seasonStr}`, 'i')
     ];
     
     const seasonPackMatch = seasonPackPatterns.some(pattern => pattern.test(normalizedTorrentTitle));
@@ -3613,6 +3632,9 @@ export default async function handler(req, res) {
             const episode = pathParts[5] ? parseInt(pathParts[5]) : null; // Episode number (for file selection in packs)
             const fileIndex = pathParts[6] ? parseInt(pathParts[6]) : null; // File index from DB (precise selection)
             const workerOrigin = url.origin;
+            
+            // Determine type from presence of season/episode
+            const type = (season !== null && episode !== null) ? 'series' : 'movie';
             
             // Initialize database for cache tracking
             let dbEnabled = false;
