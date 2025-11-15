@@ -3743,6 +3743,7 @@ export default async function handler(req, res) {
                         }
                     }
                     // ✅ PRIORITY 2: For series episodes, try pattern matching
+                    let episodeMatchFound = false; // Track if we found the correct episode
                     if (!targetFile && season && episode) {
                         const seasonStr = String(season).padStart(2, '0');
                         const episodeStr = String(episode).padStart(2, '0');
@@ -3757,8 +3758,10 @@ export default async function handler(req, res) {
                             return (
                                 // Standard: S08E02
                                 lowerPath.includes(`s${seasonStr}e${episodeStr}`) ||
-                                // Compact: 8x02
+                                // Compact: 8x02 (with leading zero)
                                 lowerPath.includes(`${season}x${episodeStr}`) ||
+                                // Compact: 8x2 (without leading zero)
+                                lowerPath.includes(`${season}x${episode}`) ||
                                 // Dotted: s08.e02
                                 lowerPath.includes(`s${seasonStr}.e${episodeStr}`) ||
                                 // Spaced: Season 8 Episode 2
@@ -3767,15 +3770,22 @@ export default async function handler(req, res) {
                                 // Italian: Stagione 8 Episodio 2
                                 lowerPath.includes(`stagione ${season} episodio ${episode}`) ||
                                 lowerPath.includes(`stagione${season}episodio${episode}`) ||
+                                // Episodio: episodio.2
+                                lowerPath.includes(`episodio.${episode}`) ||
+                                lowerPath.includes(`episodio ${episode}`) ||
                                 // Compact numbers: 802 (with word boundaries)
                                 new RegExp(`[^0-9]${season}${episodeStr}[^0-9]`).test(lowerPath) ||
                                 // Alternative formats
                                 lowerPath.includes(`ep${episodeStr}`) && lowerPath.includes(`s${seasonStr}`) ||
-                                lowerPath.includes(`e${episodeStr}`) && lowerPath.includes(`s${seasonStr}`)
+                                lowerPath.includes(`e${episodeStr}`) && lowerPath.includes(`s${seasonStr}`) ||
+                                // Episode without leading zero: ep2, e2
+                                lowerPath.includes(`ep${episode}`) && lowerPath.includes(`s${seasonStr}`) ||
+                                lowerPath.includes(`e${episode}`) && lowerPath.includes(`s${seasonStr}`)
                             );
                         });
                         
                         if (targetFile) {
+                            episodeMatchFound = true; // Pattern matching succeeded
                             console.log(`[RealDebrid] ✅ Found episode file: ${targetFile.path}`);
                         } else {
                             console.log(`[RealDebrid] ⚠️ Specific episode not found, using largest file`);
@@ -3933,7 +3943,8 @@ export default async function handler(req, res) {
                             console.log(`💾 [DB] Marked ${infoHash} as RD cached (5-day TTL)`);
                             
                             // Save file info (fileIndex + filename) for series episodes
-                            if (type === 'series' && season && episode && targetFile) {
+                            // ONLY save if pattern matching found the correct episode (not fallback)
+                            if (type === 'series' && season && episode && targetFile && episodeMatchFound) {
                                 console.log(`💾 [DB] Attempting to save file info: type=${type}, season=${season}, episode=${episode}, targetFile.id=${targetFile.id}, targetFile.path=${targetFile.path}`);
                                 
                                 // Get imdbId from DB to save file info in 'files' table
@@ -3969,6 +3980,8 @@ export default async function handler(req, res) {
                                 } else {
                                     console.warn(`⚠️ [DB] Failed to save file info (no rows updated)`);
                                 }
+                            } else if (type === 'series' && season && episode && targetFile && !episodeMatchFound) {
+                                console.log(`⏭️  [DB] Skipping file info save: pattern matching failed (using fallback largest file)`);
                             } else {
                                 console.log(`⏭️  [DB] Skipping file info save: type=${type}, season=${season}, episode=${episode}, hasTargetFile=${!!targetFile}`);
                             }
