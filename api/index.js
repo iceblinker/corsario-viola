@@ -2776,6 +2776,7 @@ async function handleStream(type, id, config, workerOrigin) {
 
             if (!bestResults.has(hash)) {
                 bestResults.set(hash, result);
+                console.log(`✅ [Dedup] NEW hash: ${hash.substring(0, 8)}... -> ${result.title}`);
             } else {
                 const existing = bestResults.get(hash);
                 const existingLangInfo = getLanguageInfo(existing.title, italianTitle);
@@ -2801,7 +2802,10 @@ async function handleStream(type, id, config, workerOrigin) {
                 }
                 
                 if (isNewBetter) {
+                    console.log(`🔄 [Dedup] REPLACE hash ${hash.substring(0, 8)}...: "${existing.title}" -> "${result.title}" (better)`);
                     bestResults.set(hash, result);
+                } else {
+                    console.log(`⏭️  [Dedup] SKIP hash ${hash.substring(0, 8)}...: "${result.title}" (keeping "${existing.title}")`);
                 }
             }
         }
@@ -3890,16 +3894,27 @@ export default async function handler(req, res) {
                             
                             // Save file info (fileIndex + filename) for series episodes
                             if (type === 'series' && season && episode && targetFile) {
-                                await dbHelper.updateTorrentFileInfo(
+                                console.log(`💾 [DB] Attempting to save file info: type=${type}, season=${season}, episode=${episode}, targetFile.id=${targetFile.id}, targetFile.path=${targetFile.path}`);
+                                
+                                const success = await dbHelper.updateTorrentFileInfo(
                                     infoHash, 
                                     targetFile.id, // RD file.id (1-based)
                                     targetFile.path // Full path with filename
                                 );
-                                console.log(`💾 [DB] Saved file info: fileIndex=${targetFile.id}, filename=${targetFile.path.split('/').pop()}`);
+                                
+                                if (success) {
+                                    console.log(`✅ [DB] Successfully saved file info: fileIndex=${targetFile.id}, filename=${targetFile.path.split('/').pop()}`);
+                                } else {
+                                    console.warn(`⚠️ [DB] Failed to save file info (no rows updated)`);
+                                }
+                            } else {
+                                console.log(`⏭️  [DB] Skipping file info save: type=${type}, season=${season}, episode=${episode}, hasTargetFile=${!!targetFile}`);
                             }
                         } catch (dbErr) {
-                            console.warn(`⚠️ Failed to update DB: ${dbErr.message}`);
+                            console.error(`❌ [DB] Error updating DB: ${dbErr.message}`, dbErr);
                         }
+                    } else {
+                        console.log(`⏭️  [DB] Skipping DB update: dbEnabled=${dbEnabled}, infoHash=${infoHash}`);
                     }
                     
                     // Check if it's a RAR archive
