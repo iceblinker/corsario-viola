@@ -2781,7 +2781,8 @@ async function handleStream(type, id, config, workerOrigin) {
                     quality: extractQuality(torrentTitle),
                     filename: fileName || torrentTitle,
                     source: `💾 ${dbResult.provider || 'Database'}`,
-                    fileIndex: dbResult.file_index || undefined // For series episodes
+                    fileIndex: dbResult.file_index || undefined, // For series episodes
+                    file_title: fileName || undefined // Real filename from DB
                 });
                 
                 // DEBUG: Log file info from DB
