@@ -2746,8 +2746,10 @@ async function handleStream(type, id, config, workerOrigin) {
                 const episodeNum = parseInt(episode);
                 
                 filteredDbResults = dbResults.filter(dbResult => {
+                    // Handle different result formats: searchEpisodeFiles uses torrent_title, others use title
+                    const torrentTitle = dbResult.torrent_title || dbResult.title;
                     return isExactEpisodeMatch(
-                        dbResult.title, 
+                        torrentTitle, 
                         mediaDetails.titles || mediaDetails.title, 
                         seasonNum, 
                         episodeNum
@@ -2759,27 +2761,32 @@ async function handleStream(type, id, config, workerOrigin) {
             
             // Convert filtered DB results to scraper format
             for (const dbResult of filteredDbResults) {
+                // Handle different result formats: searchEpisodeFiles uses torrent_title, others use title
+                const torrentTitle = dbResult.torrent_title || dbResult.title;
+                const torrentSize = dbResult.torrent_size || dbResult.size;
+                const fileName = dbResult.file_title;
+                
                 // Build magnet link
-                const magnetLink = `magnet:?xt=urn:btih:${dbResult.info_hash}&dn=${encodeURIComponent(dbResult.title)}`;
+                const magnetLink = `magnet:?xt=urn:btih:${dbResult.info_hash}&dn=${encodeURIComponent(torrentTitle)}`;
                 
                 // Add to raw results with high priority
                 allRawResults.push({
-                    title: dbResult.title,
+                    title: torrentTitle,
                     infoHash: dbResult.info_hash.toUpperCase(),
                     magnetLink: magnetLink,
                     seeders: dbResult.seeders || 0,
                     leechers: 0,
-                    size: dbResult.size ? formatBytes(dbResult.size) : 'Unknown',
-                    sizeInBytes: dbResult.size || 0,
-                    quality: extractQuality(dbResult.title),
-                    filename: dbResult.file_title || dbResult.title,
+                    size: torrentSize ? formatBytes(torrentSize) : 'Unknown',
+                    sizeInBytes: torrentSize || 0,
+                    quality: extractQuality(torrentTitle),
+                    filename: fileName || torrentTitle,
                     source: `💾 ${dbResult.provider || 'Database'}`,
                     fileIndex: dbResult.file_index || undefined // For series episodes
                 });
                 
                 // DEBUG: Log file info from DB
-                if (dbResult.file_index || dbResult.file_title) {
-                    console.log(`🔍 [DB DEBUG] Torrent has file info: fileIndex=${dbResult.file_index}, file_title=${dbResult.file_title}`);
+                if (dbResult.file_index || fileName) {
+                    console.log(`🔍 [DB DEBUG] Torrent "${torrentTitle}" has file info: fileIndex=${dbResult.file_index}, file_title=${fileName}`);
                 }
             }
             
@@ -3929,14 +3936,36 @@ export default async function handler(req, res) {
                             if (type === 'series' && season && episode && targetFile) {
                                 console.log(`💾 [DB] Attempting to save file info: type=${type}, season=${season}, episode=${episode}, targetFile.id=${targetFile.id}, targetFile.path=${targetFile.path}`);
                                 
+                                // Get imdbId from DB to save file info in 'files' table
+                                let imdbId = null;
+                                try {
+                                    const torrentInfo = await dbHelper.searchByImdbId(infoHash);
+                                    if (!torrentInfo || torrentInfo.length === 0) {
+                                        // Try finding by hash in database
+                                        const query = 'SELECT imdb_id FROM torrents WHERE info_hash = $1 LIMIT 1';
+                                        const pool = dbHelper.initDatabase();
+                                        const result = await pool.query(query, [infoHash.toLowerCase()]);
+                                        if (result.rows.length > 0) {
+                                            imdbId = result.rows[0].imdb_id;
+                                        }
+                                    } else {
+                                        imdbId = torrentInfo[0].imdb_id;
+                                    }
+                                } catch (err) {
+                                    console.warn(`⚠️ [DB] Could not retrieve imdbId for ${infoHash}:`, err.message);
+                                }
+                                
+                                const episodeInfo = imdbId ? { imdbId, season, episode } : null;
+                                
                                 const success = await dbHelper.updateTorrentFileInfo(
                                     infoHash, 
                                     targetFile.id, // RD file.id (1-based)
-                                    targetFile.path // Full path with filename
+                                    targetFile.path, // Full path with filename
+                                    episodeInfo // Pass episode info for 'files' table
                                 );
                                 
                                 if (success) {
-                                    console.log(`✅ [DB] Successfully saved file info: fileIndex=${targetFile.id}, filename=${targetFile.path.split('/').pop()}`);
+                                    console.log(`✅ [DB] Successfully saved file info: fileIndex=${targetFile.id}, filename=${targetFile.path.split('/').pop()}${episodeInfo ? ` (to files table: ${episodeInfo.imdbId} S${season}E${episode})` : ' (to torrents table)'}`);
                                 } else {
                                     console.warn(`⚠️ [DB] Failed to save file info (no rows updated)`);
                                 }
