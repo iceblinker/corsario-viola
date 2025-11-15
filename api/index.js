@@ -3801,7 +3801,15 @@ export default async function handler(req, res) {
                     }
                     
                     if (targetFile) {
-                        await realdebrid.selectFiles(torrent.id, targetFile.id);
+                        // ✅ For series: Select ALL video files (not just target) so all episodes are available
+                        if (type === 'series' && videoFiles.length > 1) {
+                            const allVideoIds = videoFiles.map(f => f.id).join(',');
+                            console.log(`[RealDebrid] 📦 Selecting all ${videoFiles.length} video files for series pack`);
+                            await realdebrid.selectFiles(torrent.id, allVideoIds);
+                        } else {
+                            // For movies or single-file torrents, select only the target
+                            await realdebrid.selectFiles(torrent.id, targetFile.id);
+                        }
                         torrent = await realdebrid.getTorrentInfo(torrent.id);
                     }
                 }
@@ -3854,25 +3862,40 @@ export default async function handler(req, res) {
                         
                         targetFile = videos.find(file => {
                             const lowerPath = file.path.toLowerCase();
+                            const lowerFilename = file.path.split('/').pop().toLowerCase();
+                            
+                            // Patterns to match (in order of specificity)
                             return (
-                                // Standard patterns
+                                // Standard: S08E02
                                 lowerPath.includes(`s${seasonStr}e${episodeStr}`) ||
+                                // Compact: 8x02 (with leading zero)
                                 lowerPath.includes(`${season}x${episodeStr}`) ||
+                                // Compact: 8x2 (without leading zero)
+                                lowerPath.includes(`${season}x${episode}`) ||
+                                // Dotted: s08.e02
                                 lowerPath.includes(`s${seasonStr}.e${episodeStr}`) ||
-                                // Season/Episode words
+                                // Spaced: Season 8 Episode 2
                                 lowerPath.includes(`season ${season} episode ${episode}`) ||
                                 lowerPath.includes(`season${season}episode${episode}`) ||
+                                // Italian: Stagione 8 Episodio 2
                                 lowerPath.includes(`stagione ${season} episodio ${episode}`) ||
                                 lowerPath.includes(`stagione${season}episodio${episode}`) ||
-                                // Compact numbers
+                                // Episodio: episodio.2
+                                lowerPath.includes(`episodio.${episode}`) ||
+                                lowerPath.includes(`episodio ${episode}`) ||
+                                // Compact numbers: 802 (with word boundaries)
                                 new RegExp(`[^0-9]${season}${episodeStr}[^0-9]`).test(lowerPath) ||
-                                // Alternative
+                                // Alternative formats
                                 lowerPath.includes(`ep${episodeStr}`) && lowerPath.includes(`s${seasonStr}`) ||
-                                lowerPath.includes(`e${episodeStr}`) && lowerPath.includes(`s${seasonStr}`)
+                                lowerPath.includes(`e${episodeStr}`) && lowerPath.includes(`s${seasonStr}`) ||
+                                // Episode without leading zero: ep2, e2
+                                lowerPath.includes(`ep${episode}`) && lowerPath.includes(`s${seasonStr}`) ||
+                                lowerPath.includes(`e${episode}`) && lowerPath.includes(`s${seasonStr}`)
                             );
                         });
                         
                         if (targetFile) {
+                            episodeMatchFound = true; // Pattern matching succeeded
                             console.log(`[RealDebrid] ✅ Found episode file: ${targetFile.path}`);
                         } else {
                             console.log(`[RealDebrid] ⚠️ Specific episode not found, using largest file`);
