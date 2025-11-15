@@ -2061,6 +2061,21 @@ function isExactEpisodeMatch(torrentTitle, showTitleOrTitles, seasonNum, episode
         return true;
     }
     
+    // ✅ EPISODE RANGE: Check if episode is in a range (e.g., "S06E01-25" contains E06)
+    // Pattern: S06E01-25, S06E01-E25, 6x01-25, etc.
+    const episodeRangePattern = new RegExp(
+        `s${seasonStr}e(\\d{1,2})\\s*[-–—]\\s*e?(\\d{1,2})`, 'i'
+    );
+    const rangeMatch = normalizedTorrentTitle.match(episodeRangePattern);
+    if (rangeMatch) {
+        const startEp = parseInt(rangeMatch[1]);
+        const endEp = parseInt(rangeMatch[2]);
+        if (episodeNum >= startEp && episodeNum <= endEp) {
+            console.log(`✅ [EPISODE RANGE] Match for "${torrentTitle}" S${seasonStr}E${startEp}-${endEp} contains E${episodeStr}`);
+            return true;
+        }
+    }
+    
     // ✅ NUOVA LOGICA: Se non trova l'episodio esatto, cerca SEASON PACK
     // Es: "Simpson Stagione 27", "Simpson S27", "Simpson Season 27 Complete"
     const seasonPackPatterns = [
