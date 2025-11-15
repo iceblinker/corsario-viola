@@ -2764,7 +2764,9 @@ async function handleStream(type, id, config, workerOrigin) {
                 // Handle different result formats: searchEpisodeFiles uses torrent_title, others use title
                 const torrentTitle = dbResult.torrent_title || dbResult.title;
                 const torrentSize = dbResult.torrent_size || dbResult.size;
-                const fileName = dbResult.file_title;
+                // Only use file_title if it came from searchEpisodeFiles (has torrent_title field)
+                // This ensures we only show the actual filename for the SPECIFIC episode
+                const fileName = dbResult.torrent_title ? dbResult.file_title : undefined;
                 
                 // Build magnet link
                 const magnetLink = `magnet:?xt=urn:btih:${dbResult.info_hash}&dn=${encodeURIComponent(torrentTitle)}`;
@@ -2782,7 +2784,7 @@ async function handleStream(type, id, config, workerOrigin) {
                     filename: fileName || torrentTitle,
                     source: `💾 ${dbResult.provider || 'Database'}`,
                     fileIndex: dbResult.file_index || undefined, // For series episodes
-                    file_title: fileName || undefined // Real filename from DB
+                    file_title: fileName || undefined // Real filename from DB (only for specific episode)
                 });
                 
                 // DEBUG: Log file info from DB
@@ -4098,27 +4100,66 @@ export default async function handler(req, res) {
                             console.error(`❌ [DB] Error updating DB: ${dbErr.message}`, dbErr);
                         }
                         
-                        // ✅ SAVE FILE INFO: Save file info in 'files' table for this episode
-                        if (targetFile && season && episode) {
+                        // ✅ SAVE FILE INFO: Save ALL files from the pack for future lookups
+                        if (type === 'series' && season && torrent && torrent.files) {
                             try {
                                 // Get imdbId from DB for this torrent
                                 const episodeImdbId = await dbHelper.getImdbIdByHash(infoHash);
                                 
-                                const episodeInfo = {
-                                    imdbId: episodeImdbId,
-                                    season: season,
-                                    episode: episode
-                                };
-                                
-                                await dbHelper.updateTorrentFileInfo(
-                                    infoHash,
-                                    targetFile.id,
-                                    targetFile.path,
-                                    episodeInfo
-                                );
-                                console.log(`💾 [DB] Saved file info: fileIndex=${targetFile.id}, filename=${targetFile.path.split('/').pop()}`);
+                                if (episodeImdbId) {
+                                    console.log(`💾 [DB] Saving ALL ${torrent.files.length} files from pack...`);
+                                    
+                                    // Iterate through ALL files in the pack
+                                    for (const file of torrent.files) {
+                                        // Only process video files
+                                        if (!file.path.match(/\.(mkv|mp4|avi|mov|wmv|flv|webm)$/i)) {
+                                            continue;
+                                        }
+                                        
+                                        // Try to extract episode number from filename
+                                        const filename = file.path.split('/').pop();
+                                        const episodeMatch = filename.match(/[se](\d{1,2})[ex](\d{1,2})|stagione[\s._-]*(\d{1,2})[\s._-]*episodio[\s._-]*(\d{1,2})|(\d{1,2})x(\d{1,2})/i);
+                                        
+                                        if (episodeMatch) {
+                                            // Extract season and episode from match
+                                            let fileSeason, fileEpisode;
+                                            if (episodeMatch[1] && episodeMatch[2]) {
+                                                fileSeason = parseInt(episodeMatch[1]);
+                                                fileEpisode = parseInt(episodeMatch[2]);
+                                            } else if (episodeMatch[3] && episodeMatch[4]) {
+                                                fileSeason = parseInt(episodeMatch[3]);
+                                                fileEpisode = parseInt(episodeMatch[4]);
+                                            } else if (episodeMatch[5] && episodeMatch[6]) {
+                                                fileSeason = parseInt(episodeMatch[5]);
+                                                fileEpisode = parseInt(episodeMatch[6]);
+                                            }
+                                            
+                                            // Only save if it matches the current season
+                                            if (fileSeason === parseInt(season)) {
+                                                const fileInfo = {
+                                                    imdbId: episodeImdbId,
+                                                    season: fileSeason,
+                                                    episode: fileEpisode
+                                                };
+                                                
+                                                await dbHelper.updateTorrentFileInfo(
+                                                    infoHash,
+                                                    file.id,
+                                                    file.path,
+                                                    fileInfo
+                                                );
+                                                
+                                                console.log(`💾 [DB] Saved S${String(fileSeason).padStart(2, '0')}E${String(fileEpisode).padStart(2, '0')}: ${filename}`);
+                                            }
+                                        }
+                                    }
+                                    
+                                    console.log(`✅ [DB] Finished saving all files from pack`);
+                                } else {
+                                    console.warn(`⚠️ [DB] No imdbId found for pack, skipping bulk save`);
+                                }
                             } catch (fileErr) {
-                                console.error(`❌ [DB] Error saving file info: ${fileErr.message}`);
+                                console.error(`❌ [DB] Error saving pack files: ${fileErr.message}`);
                             }
                         }
                     }
