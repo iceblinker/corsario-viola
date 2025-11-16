@@ -11,13 +11,13 @@ let pool = null;
 function initDatabase(config = {}) {
   if (pool) return pool;
 
-  // ✅ Hardcoded fallback credentials for VPS database
+  // ✅ Use environment variables for database connection
   pool = new Pool({
-    host: config.host || process.env.DB_HOST || '89.168.25.177',
-    port: config.port || process.env.DB_PORT || 5432,
-    database: config.database || process.env.DB_NAME || 'stremizio',
-    user: config.user || process.env.DB_USER || 'stremizio_user',
-    password: config.password || process.env.DB_PASSWORD || 'stremizio',
+    host: config.host || process.env.DB_HOST,
+    port: config.port || process.env.DB_PORT,
+    database: config.database || process.env.DB_NAME,
+    user: config.user || process.env.DB_USER,
+    password: config.password || process.env.DB_PASSWORD,
     max: 20,
     idleTimeoutMillis: 30000,
     connectionTimeoutMillis: 5000, // Vercel timeout-friendly
