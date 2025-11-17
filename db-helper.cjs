@@ -616,15 +616,23 @@ async function searchByTitleFTS(cleanedTitle, type = null, year = null) {
 
 /**
  * Update torrents with completed IDs (auto-repair)
- * @param {string} infoHash - Info hash of torrent to update
+ * @param {string|Array<string>} infoHashes - Info hash(es) of torrents to update
  * @param {string|null} imdbId - IMDb ID to set (if missing)
  * @param {number|null} tmdbId - TMDb ID to set (if missing)
- * @returns {Promise<boolean>} Success status
+ * @returns {Promise<number>} Number of updated torrents
  */
-async function updateTorrentsWithIds(infoHash, imdbId, tmdbId) {
+async function updateTorrentsWithIds(infoHashes, imdbId, tmdbId) {
   if (!pool) throw new Error('Database not initialized');
   
   try {
+    // Convert single hash to array
+    const hashArray = Array.isArray(infoHashes) ? infoHashes : [infoHashes];
+    
+    if (hashArray.length === 0) {
+      console.log(`💾 [DB] No hashes to update`);
+      return 0;
+    }
+    
     const updates = [];
     const params = [];
     let paramIndex = 1;
@@ -645,31 +653,13 @@ async function updateTorrentsWithIds(infoHash, imdbId, tmdbId) {
       return 0;
     }
     
-    // Build WHERE clause: update all torrents with same TMDb/IMDb
-    const conditions = [];
-    
-    // If we have tmdbId, update all torrents with this tmdbId OR this infoHash
-    if (tmdbId) {
-      conditions.push(`(tmdb_id = $${paramIndex} OR info_hash = $${paramIndex + 1})`);
-      params.push(tmdbId);
-      params.push(infoHash);
-      paramIndex += 2;
-    } else if (imdbId) {
-      // If only imdbId, update all torrents with this imdbId OR this infoHash
-      conditions.push(`(imdb_id = $${paramIndex} OR info_hash = $${paramIndex + 1})`);
-      params.push(imdbId);
-      params.push(infoHash);
-      paramIndex += 2;
-    } else {
-      // Fallback: only update single torrent
-      conditions.push(`info_hash = $${paramIndex}`);
-      params.push(infoHash);
-    }
+    // Build WHERE clause: update all torrents in the hash array
+    params.push(hashArray.map(h => h.toLowerCase()));
     
     const query = `
       UPDATE torrents 
       SET ${updates.join(', ')}
-      WHERE ${conditions.join(' AND ')}
+      WHERE info_hash = ANY($${paramIndex})
       AND (imdb_id IS NULL OR tmdb_id IS NULL)
     `;
     
