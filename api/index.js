@@ -1918,6 +1918,7 @@ async function getTMDBDetailsByImdb(imdbId, tmdbApiKey) {
                 title: movie.title,
                 year: year,
                 type: 'movie',
+                imdbId: imdbId,  // ✅ FIX: Include imdbId
                 tmdbId: movie.id
             };
         }
@@ -1929,6 +1930,7 @@ async function getTMDBDetailsByImdb(imdbId, tmdbApiKey) {
                 title: show.name,
                 year: year,
                 type: 'series',
+                imdbId: imdbId,  // ✅ FIX: Include imdbId
                 tmdbId: show.id
             };
         }
