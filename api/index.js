@@ -2810,25 +2810,36 @@ async function handleStream(type, id, config, workerOrigin) {
         if (decodedId.startsWith('kitsu:')) {
             const parts = decodedId.split(':');
             kitsuId = parts[1];
-            const absoluteEpisode = parts[2]; // For Kitsu, this is absolute episode number
+            const absoluteEpisode = parts[2]; // For Kitsu, this is absolute episode number (optional for movies)
             
-            if (!absoluteEpisode) {
-                console.log('❌ Invalid Kitsu format: episode number required');
+            // ✅ If no episode number, it's a MOVIE (e.g., kitsu:45513 = One Piece Film Red)
+            if (!absoluteEpisode && type === 'movie') {
+                console.log(`🎬 Looking up Kitsu movie details for: ${kitsuId}`);
+                mediaDetails = await getKitsuDetails(kitsuId);
+                
+                if (mediaDetails) {
+                    mediaDetails.isAnime = true;  // Mark as anime for special handling
+                    // For movies, we don't need episode info
+                }
+            } else if (!absoluteEpisode && type === 'series') {
+                // Series MUST have episode number
+                console.log('❌ Invalid Kitsu format: episode number required for series');
                 return { streams: [] };
-            }
-            
-            // For Kitsu anime, we don't have season mapping - store as absolute episode
-            // We'll search for generic packs without season filtering
-            season = null;  // No season for Kitsu
-            episode = absoluteEpisode;
-            
-            console.log(`🌸 Looking up Kitsu details for: ${kitsuId}, absolute episode: ${absoluteEpisode}`);
-            mediaDetails = await getKitsuDetails(kitsuId);
-            
-            // Add absolute episode info to mediaDetails
-            if (mediaDetails) {
-                mediaDetails.absoluteEpisode = parseInt(absoluteEpisode);
-                mediaDetails.isAnime = true;  // Mark as anime for special handling
+            } else {
+                // Series with episode number
+                // For Kitsu anime, we don't have season mapping - store as absolute episode
+                // We'll search for generic packs without season filtering
+                season = null;  // No season for Kitsu
+                episode = absoluteEpisode;
+                
+                console.log(`🌸 Looking up Kitsu details for: ${kitsuId}, absolute episode: ${absoluteEpisode}`);
+                mediaDetails = await getKitsuDetails(kitsuId);
+                
+                // Add absolute episode info to mediaDetails
+                if (mediaDetails) {
+                    mediaDetails.absoluteEpisode = parseInt(absoluteEpisode);
+                    mediaDetails.isAnime = true;  // Mark as anime for special handling
+                }
             }
         } else {
             // ✅ SOLUZIONE 2: Detect if ID is TMDb (pure number) or IMDb (starts with 'tt')
