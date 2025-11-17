@@ -1940,6 +1940,37 @@ async function getTMDBDetailsByImdb(imdbId, tmdbApiKey) {
     }
 }
 
+// ✅ SOLUZIONE 2: Get details from TMDb ID (not IMDb)
+async function getTMDBDetailsByTmdb(tmdbId, type, tmdbApiKey) {
+    try {
+        const mediaType = type === 'series' ? 'tv' : 'movie';
+        const url = `${TMDB_BASE_URL}/${mediaType}/${tmdbId}?api_key=${tmdbApiKey}&append_to_response=external_ids`;
+        
+        console.log(`🔄 Fetching TMDb details for ${mediaType} ${tmdbId}...`);
+        const response = await fetch(url);
+        if (!response.ok) throw new Error(`TMDB API error: ${response.status}`);
+        const data = await response.json();
+        
+        const title = data.title || data.name;
+        const releaseDate = data.release_date || data.first_air_date;
+        const year = releaseDate ? new Date(releaseDate).getFullYear() : null;
+        const imdbId = data.external_ids?.imdb_id || null;
+        
+        console.log(`✅ TMDb ${tmdbId} → ${title} (${year})${imdbId ? `, IMDb: ${imdbId}` : ''}`);
+        
+        return {
+            title: title,
+            year: year,
+            type: type,
+            tmdbId: tmdbId,
+            imdbId: imdbId // ✅ Include IMDb from external_ids
+        };
+    } catch (error) {
+        console.error(`❌ TMDB fetch error for ${type} ${tmdbId}:`, error);
+        return null;
+    }
+}
+
 // 🔥 NEW: Save CorsaroNero results we already found (no additional search needed!)
 async function saveCorsaroResultsToDB(corsaroResults, mediaDetails, type, dbHelper, italianTitle = null) {
     try {
@@ -2071,7 +2102,23 @@ async function enrichDatabaseInBackground(mediaDetails, type, season = null, epi
             }
         }
         
-        console.log(`🔄 [Background] After IMDb conversion: tmdbId=${mediaDetails.tmdbId}`);
+        // ✅ SOLUZIONE 1: If we have TMDB but not IMDB, try to get IMDB ID
+        if (mediaDetails.tmdbId && !mediaDetails.imdbId) {
+            try {
+                console.log(`🔄 [Background] Converting TMDb to IMDb...`);
+                const { imdbId } = await completeIds(null, mediaDetails.tmdbId, type);
+                if (imdbId) {
+                    mediaDetails.imdbId = imdbId;
+                    console.log(`🔄 [Background] Enriched IMDb ID: ${imdbId} from TMDb: ${mediaDetails.tmdbId}`);
+                } else {
+                    console.warn(`⚠️ [Background] IMDb conversion returned no data`);
+                }
+            } catch (error) {
+                console.error(`❌ [Background] Error in IMDb conversion:`, error);
+            }
+        }
+        
+        console.log(`🔄 [Background] After ID conversion: imdbId=${mediaDetails.imdbId}, tmdbId=${mediaDetails.tmdbId}`);
         
         // �🇹 Get ITALIAN title and ORIGINAL title from TMDB (critical for Italian content!)
         let italianTitle = null;
@@ -2228,8 +2275,91 @@ async function enrichDatabaseInBackground(mediaDetails, type, season = null, epi
     }
 }
 
+// ✅ SOLUZIONE KITSU 1: Get MyAnimeList ID from Kitsu ID
+async function getMALfromKitsu(kitsuId) {
+    try {
+        console.log(`🔄 [Kitsu→MAL] Fetching MAL ID for Kitsu ${kitsuId}...`);
+        
+        const response = await fetch(
+            `https://kitsu.io/api/edge/anime/${kitsuId}/mappings`,
+            { 
+                headers: { 'Accept': 'application/vnd.api+json' },
+                timeout: 5000 
+            }
+        );
+        
+        if (!response.ok) {
+            console.warn(`⚠️ [Kitsu→MAL] Kitsu mappings API error: ${response.status}`);
+            return null;
+        }
+        
+        const data = await response.json();
+        
+        // Find MyAnimeList mapping
+        const malMapping = data.data?.find(mapping => 
+            mapping.attributes?.externalSite === 'myanimelist/anime'
+        );
+        
+        if (!malMapping || !malMapping.attributes?.externalId) {
+            console.log(`⚠️ [Kitsu→MAL] No MAL mapping found for Kitsu ${kitsuId}`);
+            return null;
+        }
+        
+        const malId = malMapping.attributes.externalId;
+        console.log(`✅ [Kitsu→MAL] Kitsu ${kitsuId} → MAL ${malId}`);
+        return malId;
+        
+    } catch (error) {
+        console.error(`❌ [Kitsu→MAL] Error:`, error.message);
+        return null;
+    }
+}
+
+// ✅ SOLUZIONE KITSU 2: Get TMDb/IMDb IDs from MyAnimeList ID
+async function getTMDbFromMAL(malId) {
+    try {
+        console.log(`🔄 [MAL→TMDb] Fetching TMDb/IMDb for MAL ${malId}...`);
+        
+        const response = await fetch(
+            `https://arm.haglund.dev/api/v2/ids?source=myanimelist&id=${malId}`,
+            { timeout: 5000 }
+        );
+        
+        if (!response.ok) {
+            console.warn(`⚠️ [MAL→TMDb] Haglund API error: ${response.status}`);
+            return null;
+        }
+        
+        const data = await response.json();
+        
+        if (!data || data.length === 0) {
+            console.log(`⚠️ [MAL→TMDb] No TMDb mapping found for MAL ${malId}`);
+            return null;
+        }
+        
+        // Extract IDs from first result
+        const result = data[0];
+        const tmdbId = result.themoviedb || null;
+        const imdbId = result.imdb || null;
+        
+        if (tmdbId || imdbId) {
+            console.log(`✅ [MAL→TMDb] MAL ${malId} → TMDb ${tmdbId}, IMDb ${imdbId}`);
+            return { tmdbId, imdbId };
+        }
+        
+        console.log(`⚠️ [MAL→TMDb] MAL ${malId} has no TMDb/IMDb IDs`);
+        return null;
+        
+    } catch (error) {
+        console.error(`❌ [MAL→TMDb] Error:`, error.message);
+        return null;
+    }
+}
+
 async function getKitsuDetails(kitsuId) {
     try {
+        console.log(`🔄 [Kitsu] Fetching details for Kitsu ID: ${kitsuId}`);
+        
         const response = await fetch(`https://kitsu.io/api/edge/anime/${kitsuId}`);
         if (!response.ok) throw new Error(`Kitsu API error: ${response.status}`);
         const data = await response.json();
@@ -2247,14 +2377,40 @@ async function getKitsuDetails(kitsuId) {
 
         const year = attributes.startDate ? new Date(attributes.startDate).getFullYear() : null;
 
-        return {
+        const mediaDetails = {
             titles: Array.from(titles), // Return an array of possible titles
             year: year,
             type: 'series',
-            kitsuId: kitsuId
+            kitsuId: kitsuId,
+            imdbId: null,
+            tmdbId: null
         };
+        
+        // ✅ SOLUZIONE KITSU 3: Try to populate IMDb/TMDb IDs via MAL bridge
+        try {
+            const malId = await getMALfromKitsu(kitsuId);
+            
+            if (malId) {
+                const ids = await getTMDbFromMAL(malId);
+                
+                if (ids) {
+                    mediaDetails.imdbId = ids.imdbId;
+                    mediaDetails.tmdbId = ids.tmdbId;
+                    console.log(`✅ [Kitsu] Populated IDs: IMDb ${ids.imdbId}, TMDb ${ids.tmdbId}`);
+                } else {
+                    console.log(`⚠️ [Kitsu] MAL ${malId} has no TMDb/IMDb mapping, will use FTS fallback`);
+                }
+            } else {
+                console.log(`⚠️ [Kitsu] No MAL mapping found, will use FTS fallback`);
+            }
+        } catch (bridgeError) {
+            console.warn(`⚠️ [Kitsu] MAL bridge failed, will use FTS fallback:`, bridgeError.message);
+        }
+        
+        return mediaDetails;
+        
     } catch (error) {
-        console.error('Kitsu fetch error:', error);
+        console.error('❌ [Kitsu] Fetch error:', error);
         return null;
     }
 }
@@ -2616,6 +2772,7 @@ async function handleStream(type, id, config, workerOrigin) {
             console.log(`🌸 Looking up Kitsu details for: ${kitsuId}`);
             mediaDetails = await getKitsuDetails(kitsuId);
         } else {
+            // ✅ SOLUZIONE 2: Detect if ID is TMDb (pure number) or IMDb (starts with 'tt')
             imdbId = decodedId;
             if (type === 'series') {
                 const parts = decodedId.split(':');
@@ -2629,14 +2786,26 @@ async function handleStream(type, id, config, workerOrigin) {
                 }
             }
             
-            const cleanImdbId = extractImdbId(imdbId);
-            if (!cleanImdbId) {
-                console.log('❌ Invalid IMDB ID format');
+            // Check if ID is TMDb (pure number) or IMDb (starts with 'tt')
+            if (imdbId.startsWith('tt')) {
+                // IMDb ID format
+                const cleanImdbId = extractImdbId(imdbId);
+                if (!cleanImdbId) {
+                    console.log('❌ Invalid IMDB ID format');
+                    return { streams: [] };
+                }
+                
+                console.log(`🔍 Looking up TMDB details for IMDb: ${cleanImdbId}`);
+                mediaDetails = await getTMDBDetailsByImdb(cleanImdbId, tmdbKey);
+            } else if (/^\d+$/.test(imdbId)) {
+                // TMDb ID format (pure number)
+                const tmdbId = parseInt(imdbId);
+                console.log(`🔍 Looking up details for TMDb: ${tmdbId}`);
+                mediaDetails = await getTMDBDetailsByTmdb(tmdbId, type, tmdbKey);
+            } else {
+                console.log('❌ Invalid ID format (not IMDb or TMDb)');
                 return { streams: [] };
             }
-            
-            console.log(`🔍 Looking up TMDB details for: ${cleanImdbId}`);
-            mediaDetails = await getTMDBDetailsByImdb(cleanImdbId, tmdbKey);
         }
 
         if (!mediaDetails) {
@@ -2715,7 +2884,7 @@ async function handleStream(type, id, config, workerOrigin) {
             if (dbResults.length > 0) {
                 console.log(`💾 [DB] Found ${dbResults.length} results in database!`);
                 
-                // Check if we need to complete IDs
+                // ✅ SOLUZIONE 3: Check if we need to complete IDs and update DB
                 const firstResult = dbResults[0];
                 if ((firstResult.imdb_id && !firstResult.tmdb_id) || 
                     (!firstResult.imdb_id && firstResult.tmdb_id)) {
@@ -2729,6 +2898,25 @@ async function handleStream(type, id, config, workerOrigin) {
                     // Update mediaDetails with completed IDs
                     if (completed.tmdbId && !mediaDetails.tmdbId) {
                         mediaDetails.tmdbId = completed.tmdbId;
+                        console.log(`💾 [DB] Populated mediaDetails.tmdbId: ${completed.tmdbId}`);
+                    }
+                    if (completed.imdbId && !mediaDetails.imdbId) {
+                        mediaDetails.imdbId = completed.imdbId;
+                        console.log(`💾 [DB] Populated mediaDetails.imdbId: ${completed.imdbId}`);
+                    }
+                    
+                    // ✅ SOLUZIONE 3: Update DB with completed IDs (auto-repair)
+                    if (completed.imdbId || completed.tmdbId) {
+                        console.log(`💾 [DB] Auto-repairing torrents with completed IDs...`);
+                        // Update all torrents with same title pattern (batch repair)
+                        const updatedCount = await dbHelper.updateTorrentsWithIds(
+                            firstResult.info_hash,
+                            completed.imdbId,
+                            completed.tmdbId
+                        );
+                        if (updatedCount) {
+                            console.log(`✅ [DB] Auto-repaired ${updatedCount} torrent(s) with completed IDs`);
+                        }
                     }
                 }
             }
