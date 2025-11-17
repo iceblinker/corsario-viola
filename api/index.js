@@ -2907,15 +2907,27 @@ async function handleStream(type, id, config, workerOrigin) {
         if (mediaDetails.tmdbId && !kitsuId) { // Solo per film/serie da TMDB
             try {
                 const detailsWithExtras = await getTMDBDetails(mediaDetails.tmdbId, mediaDetails.type, tmdbKey, 'translations');
-                const italianTranslation = detailsWithExtras?.translations?.translations?.find(t => t.iso_639_1 === 'it');
+                console.log(`🔍 [Italian Title] TMDB response received, checking translations...`);
                 
-                if (italianTranslation && (italianTranslation.data.title || italianTranslation.data.name)) {
-                    const foundTitle = italianTranslation.data.title || italianTranslation.data.name;
-                    // Usa il titolo italiano solo se è diverso da quello inglese per evitare falsi positivi
-                    if (foundTitle && foundTitle.toLowerCase() !== mediaDetails.title.toLowerCase()) {
-                        italianTitle = foundTitle;
-                        console.log(`🇮🇹 Found Italian title: "${italianTitle}"`);
+                if (detailsWithExtras?.translations?.translations) {
+                    console.log(`🔍 [Italian Title] Found ${detailsWithExtras.translations.translations.length} translations`);
+                    const italianTranslation = detailsWithExtras.translations.translations.find(t => t.iso_639_1 === 'it');
+                    
+                    if (italianTranslation) {
+                        console.log(`🔍 [Italian Title] Italian translation found:`, JSON.stringify(italianTranslation.data));
+                        const foundTitle = italianTranslation.data.title || italianTranslation.data.name;
+                        // Usa il titolo italiano solo se è diverso da quello inglese per evitare falsi positivi
+                        if (foundTitle && foundTitle.toLowerCase() !== mediaDetails.title.toLowerCase()) {
+                            italianTitle = foundTitle;
+                            console.log(`🇮🇹 Found Italian title: "${italianTitle}"`);
+                        } else if (foundTitle) {
+                            console.log(`⚠️ [Italian Title] Italian title "${foundTitle}" is same as English title, skipping`);
+                        }
+                    } else {
+                        console.log(`⚠️ [Italian Title] No Italian (it) translation found`);
                     }
+                } else {
+                    console.log(`⚠️ [Italian Title] No translations data in TMDB response`);
                 }
 
                 if (detailsWithExtras && (detailsWithExtras.original_title || detailsWithExtras.original_name)) {
@@ -3239,9 +3251,14 @@ async function handleStream(type, id, config, workerOrigin) {
                 searchQueries.push(`${italianTitle} Stagione ${season}`);
                 searchQueries.push(`${italianTitle} Season ${season}`);
                 searchQueries.push(italianTitle);
+                
+                // 🆕 Query miste (inglese + italiano) per siti che usano entrambi
+                searchQueries.push(`${mediaDetails.title} ${italianTitle} S${seasonStr}`);
+                searchQueries.push(`${mediaDetails.title} ${italianTitle}`);
             } else if (type === 'movie') {
                 searchQueries.push(`${italianTitle} ${mediaDetails.year}`);
                 searchQueries.push(italianTitle);
+                searchQueries.push(`${mediaDetails.title} ${italianTitle}`);
             }
         }
 
