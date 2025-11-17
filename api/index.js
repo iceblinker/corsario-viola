@@ -2760,21 +2760,26 @@ async function handleStream(type, id, config, workerOrigin) {
         if (decodedId.startsWith('kitsu:')) {
             const parts = decodedId.split(':');
             kitsuId = parts[1];
-            season = parts[2];
-            episode = parts[3];
+            const absoluteEpisode = parts[2]; // For Kitsu, this is absolute episode number
             
-            if (episode === undefined) {
-                console.log('⚠️ Episode number missing from Kitsu ID, defaulting to episode 1.');
-                episode = '1';
-            }
-
-            if (!kitsuId || !season || !episode) {
-                console.log('❌ Invalid Kitsu series format');
+            if (!absoluteEpisode) {
+                console.log('❌ Invalid Kitsu format: episode number required');
                 return { streams: [] };
             }
             
-            console.log(`🌸 Looking up Kitsu details for: ${kitsuId}`);
+            // For Kitsu anime, we don't have season mapping - store as absolute episode
+            // We'll search for generic packs without season filtering
+            season = null;  // No season for Kitsu
+            episode = absoluteEpisode;
+            
+            console.log(`🌸 Looking up Kitsu details for: ${kitsuId}, absolute episode: ${absoluteEpisode}`);
             mediaDetails = await getKitsuDetails(kitsuId);
+            
+            // Add absolute episode info to mediaDetails
+            if (mediaDetails) {
+                mediaDetails.absoluteEpisode = parseInt(absoluteEpisode);
+                mediaDetails.isAnime = true;  // Mark as anime for special handling
+            }
         } else {
             // ✅ SOLUZIONE 2: Detect if ID is TMDb (pure number) or IMDb (starts with 'tt')
             imdbId = decodedId;
@@ -2866,19 +2871,25 @@ async function handleStream(type, id, config, workerOrigin) {
         let dbResults = [];
         if (dbEnabled && mediaDetails.imdbId) {
             if (type === 'series') {
-                // Search for specific episode
-                dbResults = await dbHelper.searchEpisodeFiles(
-                    mediaDetails.imdbId, 
-                    parseInt(season), 
-                    parseInt(episode)
-                );
-                
-                // 🔥 ALSO search for season packs and complete packs (they don't have file_index)
-                const packResults = await dbHelper.searchByImdbId(mediaDetails.imdbId, type);
-                console.log(`💾 [DB] Found ${packResults.length} additional torrents (packs/complete series)`);
-                
-                // Merge: episode files + packs
-                dbResults = [...dbResults, ...packResults];
+                // For anime (Kitsu), we don't have season mapping - skip episode search, get all packs
+                if (mediaDetails.isAnime || season === null) {
+                    console.log(`🎌 [Anime] Skipping episode search for anime, fetching all packs`);
+                    dbResults = await dbHelper.searchByImdbId(mediaDetails.imdbId, type);
+                } else {
+                    // Search for specific episode (normal series)
+                    dbResults = await dbHelper.searchEpisodeFiles(
+                        mediaDetails.imdbId, 
+                        parseInt(season), 
+                        parseInt(episode)
+                    );
+                    
+                    // 🔥 ALSO search for season packs and complete packs (they don't have file_index)
+                    const packResults = await dbHelper.searchByImdbId(mediaDetails.imdbId, type);
+                    console.log(`💾 [DB] Found ${packResults.length} additional torrents (packs/complete series)`);
+                    
+                    // Merge: episode files + packs
+                    dbResults = [...dbResults, ...packResults];
+                }
             } else {
                 // Search for movie
                 dbResults = await dbHelper.searchByImdbId(mediaDetails.imdbId, type);
@@ -3082,15 +3093,14 @@ async function handleStream(type, id, config, workerOrigin) {
         if (type === 'series') {
             if (kitsuId) { // Anime search strategy
                 const uniqueQueries = new Set();
+                const absEpisode = mediaDetails.absoluteEpisode || episode;
+                console.log(`🎌 [Anime] Building queries for absolute episode ${absEpisode}, titles: ${mediaDetails.titles.length}`);
+                
                 // Use all available titles from Kitsu to build search queries
                 for (const title of mediaDetails.titles) {
-                    // 1. Title + episode number (e.g., "Naruto 24")
-                    uniqueQueries.add(`${title} ${episode}`);
-                    // 2. Title + SxxExx (e.g., "Naruto S01E24")
-                    uniqueQueries.add(`${title} S${String(season).padStart(2, '0')}E${String(episode).padStart(2, '0')}`);
-                    // 3. Title + season pack (e.g., "Naruto S01")
-                    uniqueQueries.add(`${title} S${String(season).padStart(2, '0')}`);
-                    // 4. Just title
+                    // 1. Title + absolute episode number (e.g., "Naruto 24", "One Piece 786")
+                    uniqueQueries.add(`${title} ${absEpisode}`);
+                    // 2. Just title (to find large packs and collections)
                     uniqueQueries.add(title);
                 }
                 searchQueries.push(...uniqueQueries);
