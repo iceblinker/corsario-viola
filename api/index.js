@@ -3843,6 +3843,18 @@ async function handleStream(type, id, config, workerOrigin) {
                         console.error("⚠️ Failed to fetch RD user torrents.", e.message);
                         return [];
                     });
+                    
+                    // STEP 4: Save user's personal cache to DB (becomes global cache for all users)
+                    if (dbEnabled && rdUserTorrents.length > 0) {
+                        const userCacheToSave = rdUserTorrents
+                            .filter(t => t.hash && t.status === 'downloaded' && hashes.includes(t.hash.toLowerCase()))
+                            .map(t => ({ hash: t.hash.toLowerCase(), cached: true }));
+                        
+                        if (userCacheToSave.length > 0) {
+                            await dbHelper.updateRdCacheStatus(userCacheToSave);
+                            console.log(`💾 [GLOBAL CACHE] Saved ${userCacheToSave.length} RD personal torrents to DB (now available for all users)`);
+                        }
+                    }
                 })()
             );
         }
@@ -3907,13 +3919,13 @@ async function handleStream(type, id, config, workerOrigin) {
                         streamUrl = `${workerOrigin}/rd-stream/${encodedConfig}/${encodeURIComponent(result.magnetLink)}`;
                     }
                     
-                    // ✅ TORRENTIO LOGIC: Check if ANY variant is cached (variants.length > 0)
-                    // rdCacheData.cached is true when variants.length > 0
-                    // rdCacheData.variants contains array of available file groups
-                    if (rdCacheData?.cached && rdCacheData.variants && rdCacheData.variants.length > 0) {
+                    // ✅ CACHE PRIORITY: DB cache (global) > User torrents (personal) > None
+                    // 1. Check DB cache (saved by any user, valid < 5 days)
+                    // 2. Check user's personal torrents (already added to their RD account)
+                    // 3. No cache available
+                    if (rdCacheData?.cached) {
                         cacheType = 'global';
-                        const variantInfo = rdCacheData.variantsCount > 1 ? ` (${rdCacheData.variantsCount} variants)` : '';
-                        console.log(`🔵 ⚡ RD GLOBAL cache available: ${result.title}${variantInfo}`);
+                        console.log(`🔵 ⚡ RD GLOBAL cache (DB): ${result.title}`);
                     } else if (rdUserTorrent && rdUserTorrent.status === 'downloaded') {
                         cacheType = 'personal';
                         console.log(`🔵 👤 Found in RD PERSONAL cache: ${result.title}`);
