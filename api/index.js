@@ -4139,7 +4139,7 @@ async function handleStream(type, id, config, workerOrigin) {
         console.log(`🎉 Successfully processed ${streams.length} streams in ${totalTime}ms`);
         console.log(`⚡ ${cachedCount} cached streams available for instant playback`);
         
-        // 🔥 ENRICHMENT: VPS webhook (fire and forget)
+        // 🔥 ENRICHMENT: VPS webhook (must complete BEFORE returning response)
         console.log(`🔍 [Background Check] dbEnabled=${dbEnabled}, mediaDetails=${!!mediaDetails}, tmdbId=${mediaDetails?.tmdbId}, imdbId=${mediaDetails?.imdbId}, kitsuId=${mediaDetails?.kitsuId}`);
         
         if (dbEnabled && mediaDetails && (mediaDetails.tmdbId || mediaDetails.imdbId || mediaDetails.kitsuId)) {
@@ -4151,33 +4151,33 @@ async function handleStream(type, id, config, workerOrigin) {
             
             console.log(`🚀 [Webhook] Calling VPS enrichment: ${enrichmentUrl}`);
             
-            fetch(enrichmentUrl, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-API-Key': enrichmentApiKey
-                },
-                body: JSON.stringify({
-                    imdbId: mediaDetails.imdbId,
-                    tmdbId: mediaDetails.tmdbId,
-                    italianTitle: italianTitle,
-                    originalTitle: originalTitle,
-                    englishTitle: mediaDetails.title,
-                    type: type,
-                    year: mediaDetails.year
-                }),
-                signal: AbortSignal.timeout(15000)
-            })
-            .then(response => {
-                if (response.ok) {
-                    console.log(`✅ [Webhook] Enrichment queued (${response.status})`);
+            try {
+                const webhookResponse = await fetch(enrichmentUrl, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-API-Key': enrichmentApiKey
+                    },
+                    body: JSON.stringify({
+                        imdbId: mediaDetails.imdbId,
+                        tmdbId: mediaDetails.tmdbId,
+                        italianTitle: italianTitle,
+                        originalTitle: originalTitle,
+                        englishTitle: mediaDetails.title,
+                        type: type,
+                        year: mediaDetails.year
+                    }),
+                    signal: AbortSignal.timeout(5000)
+                });
+                
+                if (webhookResponse.ok) {
+                    console.log(`✅ [Webhook] Enrichment queued (${webhookResponse.status})`);
                 } else {
-                    console.warn(`⚠️ [Webhook] Failed: ${response.status}`);
+                    console.warn(`⚠️ [Webhook] Failed: ${webhookResponse.status}`);
                 }
-            })
-            .catch(err => {
+            } catch (err) {
                 console.warn(`⚠️ [Webhook] Unreachable:`, err.message);
-            });
+            }
         } else {
             console.log(`⏭️  [Background] Enrichment skipped (dbEnabled=${dbEnabled}, hasMediaDetails=${!!mediaDetails}, hasIds=${!!(mediaDetails?.tmdbId || mediaDetails?.imdbId || mediaDetails?.kitsuId)})`);
         }
