@@ -4152,6 +4152,7 @@ async function handleStream(type, id, config, workerOrigin) {
                 if (corsaroResults.length > 0) {
                     // Fire and forget - don't wait
                     saveCorsaroResultsToDB(corsaroResults, mediaDetails, type, dbHelper, italianTitle)
+                        .then(() => console.log(`✅ [Background] CorsaroNero results saved`))
                         .catch(err => console.warn(`⚠️ [Background] DB save failed (non-critical):`, err.message));
                 }
             } else {
@@ -4169,9 +4170,6 @@ async function handleStream(type, id, config, workerOrigin) {
                         console.warn(`⚠️ [Background] Enrichment failed (non-critical):`, err.message);
                         console.error(`❌ [Background] Full error:`, err);
                     });
-                
-                // Small delay to let enrichment start before response (50ms)
-                await new Promise(resolve => setTimeout(resolve, 50));
             } else {
                 console.log(`⏭️  [Background] Enrichment skipped (no Italian title difference)`);
             }
