@@ -3470,6 +3470,16 @@ async function handleStream(type, id, config, workerOrigin) {
         if (dbResults.length > 0) {
             console.log(`💾 [DB] Adding ${dbResults.length} database results to aggregation...`);
             
+            // DEBUG: Log all unique hashes BEFORE filtering
+            const uniqueHashes = [...new Set(dbResults.map(r => r.info_hash))];
+            console.log(`💾 [DB] Before filter: ${uniqueHashes.length} unique torrents out of ${dbResults.length} total results`);
+            uniqueHashes.forEach(hash => {
+                const torrents = dbResults.filter(r => r.info_hash === hash);
+                const firstTorrent = torrents[0];
+                const title = firstTorrent.torrent_title || firstTorrent.title;
+                console.log(`  - ${hash.substring(0,8)}: "${title.substring(0,60)}..." (appears ${torrents.length} times)`);
+            });
+            
             // ✅ FILTER DB RESULTS for series by season/episode (like scraping results)
             let filteredDbResults = dbResults;
             if (type === 'series' && season && episode) {
@@ -3479,12 +3489,19 @@ async function handleStream(type, id, config, workerOrigin) {
                 filteredDbResults = dbResults.filter(dbResult => {
                     // Handle different result formats: searchEpisodeFiles uses torrent_title, others use title
                     const torrentTitle = dbResult.torrent_title || dbResult.title;
-                    return isExactEpisodeMatch(
+                    const match = isExactEpisodeMatch(
                         torrentTitle, 
                         mediaDetails.titles || mediaDetails.title, 
                         seasonNum, 
                         episodeNum
                     );
+                    
+                    // DEBUG: Log rejected torrents
+                    if (!match) {
+                        console.log(`  ❌ REJECTED: ${dbResult.info_hash.substring(0,8)} - "${torrentTitle.substring(0,70)}"`);
+                    }
+                    
+                    return match;
                 });
                 
                 console.log(`💾 [DB] Filtered to ${filteredDbResults.length}/${dbResults.length} torrents matching S${String(seasonNum).padStart(2, '0')}E${String(episodeNum).padStart(2, '0')}`);
