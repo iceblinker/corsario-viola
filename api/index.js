@@ -2210,45 +2210,24 @@ async function enrichDatabaseInBackground(mediaDetails, type, season = null, epi
         
         console.log(`🔄 [Background] Title fetching complete. Italian: "${italianTitle}", Original: "${originalTitle}"`);
         
-        // Build search queries (ENGLISH + ITALIAN + ORIGINAL)
+        // 🎯 SIMPLIFIED SEARCH: Solo titoli base (senza stagioni/episodi specifici)
+        // Questo permette di trovare TUTTI i torrent e aggiungerli al DB
         const searchQueries = [];
-        if (type === 'series') {
-            const seasonStr = season ? String(season).padStart(2, '0') : '';
-            
-            // 🇮🇹 PRIORITY 1: Italian title queries (MOST IMPORTANT for CorsaroNero!)
-            if (italianTitle && italianTitle !== mediaDetails.title) {
-                searchQueries.push(`${italianTitle} S${seasonStr}`);
-                searchQueries.push(`${italianTitle} Stagione ${season}`);
-                searchQueries.push(`${italianTitle} Season ${season}`);
-            }
-            
-            // 🌍 PRIORITY 2: Original title queries
-            if (originalTitle && originalTitle !== mediaDetails.title && originalTitle !== italianTitle) {
-                searchQueries.push(`${originalTitle} S${seasonStr}`);
-                searchQueries.push(`${originalTitle} Stagione ${season}`);
-                searchQueries.push(`${originalTitle} Season ${season}`);
-            }
-            
-            // 🇬🇧 PRIORITY 3: English title queries (fallback)
-            searchQueries.push(`${mediaDetails.title} S${seasonStr}`);
-            searchQueries.push(`${mediaDetails.title} Stagione ${season}`);
-            searchQueries.push(`${mediaDetails.title} Season ${season}`);
-        } else {
-            // 🇮🇹 PRIORITY 1: Italian title (MOST IMPORTANT!)
-            if (italianTitle && italianTitle !== mediaDetails.title) {
-                searchQueries.push(`${italianTitle} ${mediaDetails.year || ''}`);
-            }
-            
-            // 🌍 PRIORITY 2: Original title
-            if (originalTitle && originalTitle !== mediaDetails.title && originalTitle !== italianTitle) {
-                searchQueries.push(`${originalTitle} ${mediaDetails.year || ''}`);
-            }
-            
-            // 🇬🇧 PRIORITY 3: English title (fallback)
-            searchQueries.push(`${mediaDetails.title} ${mediaDetails.year || ''}`);
+        
+        // 🇮🇹 PRIORITY 1: Italian title (MOST IMPORTANT for CorsaroNero!)
+        if (italianTitle && italianTitle !== mediaDetails.title) {
+            searchQueries.push(italianTitle);
         }
         
-        console.log(`🔄 [Background] Search queries:`, searchQueries);
+        // 🇬🇧 PRIORITY 2: English title
+        searchQueries.push(mediaDetails.title);
+        
+        // 🌍 PRIORITY 3: Original title (if different from both)
+        if (originalTitle && originalTitle !== mediaDetails.title && originalTitle !== italianTitle) {
+            searchQueries.push(originalTitle);
+        }
+        
+        console.log(`🔄 [Background] Simple search queries (all content):`, searchQueries);
         
         // Search CorsaroNero (IT focus)
         const corsaroResults = [];
@@ -2270,15 +2249,14 @@ async function enrichDatabaseInBackground(mediaDetails, type, season = null, epi
             return;
         }
         
-        // Prepare DB inserts
-        console.log(`🔄 [Background] Preparing ${corsaroResults.length} torrents for insertion...`);
+        // 🔄 Prepare DB inserts with UPSERT logic (update IDs if missing)
+        console.log(`🔄 [Background] Preparing ${corsaroResults.length} torrents for DB upsert...`);
         const torrentsToInsert = [];
         for (const result of corsaroResults) {
             if (!result.infoHash || result.infoHash.length < 32) {
                 console.log(`⚠️ [Background] Skipping torrent with invalid hash (${result.infoHash?.length || 0} chars): ${result.title}`);
                 continue;
             }
-            console.log(`✅ [Background] Valid hash for: ${result.title.substring(0, 60)}...`);
             
             // Extract IMDB ID from title if available (pattern: tt1234567)
             const imdbMatch = result.title.match(/tt\d{7,8}/i);
@@ -2288,26 +2266,29 @@ async function enrichDatabaseInBackground(mediaDetails, type, season = null, epi
                 info_hash: result.infoHash.toLowerCase(),
                 provider: 'CorsaroNero',
                 title: result.title,
-                size: result.mainFileSize || result.sizeInBytes || 0, // mainFileSize è il valore corretto
+                size: result.mainFileSize || result.sizeInBytes || 0,
                 type: type,
                 upload_date: new Date().toISOString(),
                 seeders: result.seeders || 0,
-                imdb_id: imdbId, // From title or mediaDetails
+                imdb_id: imdbId,
                 tmdb_id: mediaDetails.tmdbId || null,
-                cached_rd: null, // Unknown cache status (will be checked on first play)
+                cached_rd: null,
                 last_cached_check: null,
-                file_index: null // Will be populated on first play
+                file_index: null
             };
             torrentsToInsert.push(torrentData);
-            console.log(`📦 [Background] Prepared torrent: hash=${result.infoHash.substring(0,8)}... imdb=${imdbId} tmdb=${mediaDetails.tmdbId} size=${torrentData.size}`);
+            console.log(`📦 [Background] Prepared: ${result.title.substring(0, 50)}... (hash=${result.infoHash.substring(0,8)} imdb=${imdbId} size=${torrentData.size})`);
         }
         
-        console.log(`🔄 [Background] Prepared ${torrentsToInsert.length}/${corsaroResults.length} torrents for insertion`);
+        console.log(`🔄 [Background] Prepared ${torrentsToInsert.length}/${corsaroResults.length} valid torrents`);
         
         if (torrentsToInsert.length === 0) {
             console.log(`🔄 [Background] No valid torrents to insert (all had invalid hashes)`);
             return;
         }
+        
+        // 🔄 Use UPSERT logic to update existing torrents with missing IDs
+        console.log(`🔄 [Background] Inserting/updating torrents with UPSERT (ON CONFLICT UPDATE)...`);
         
         // Insert into DB (batch insert)
         try {
