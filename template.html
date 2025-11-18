@@ -2,7 +2,7 @@
 <html lang="it">
 <head> 
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <link rel="icon" type="image/png" href="logo.png">
     <link rel="shortcut icon" type="image/png" href="logo.png">
     <title>IlCorsaroViola | Configurazione</title>
@@ -24,11 +24,14 @@
             position: fixed;
             top: 0;
             left: 0;
-            width: 100%;
-            height: 100%;
+            width: 100vw;
+            height: 100vh;
+            min-height: 100vh;
+            min-height: -webkit-fill-available;
             z-index: 0;
             touch-action: none;
             pointer-events: none;
+            overflow: hidden;
         }
         
         #container canvas {
@@ -44,9 +47,16 @@
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
             color: #ffffff;
             min-height: 100vh;
-            padding: 20px;
+            min-height: -webkit-fill-available;
+            padding: clamp(10px, 2vw, 20px);
             position: relative;
             background: #0a0515;
+        }
+        
+        @media (max-width: 640px) {
+            body {
+                padding: 10px;
+            }
         }
         
         .container {
@@ -72,14 +82,14 @@
         }
         
         .logo {
-            width: 100px;
-            height: 100px;
+            width: clamp(60px, 15vw, 100px);
+            height: clamp(60px, 15vw, 100px);
             border-radius: 50%;
             box-shadow: 0 8px 32px rgba(138, 43, 226, 0.4);
         }
         
         .brand h1 {
-            font-size: 4.5em;
+            font-size: clamp(1.8rem, 8vw, 4.5em);
             font-weight: 700;
             background: linear-gradient(90deg, 
                 #ffffff 0%, 
@@ -95,6 +105,8 @@
             margin-bottom: 5px;
             text-align: center;
             animation: waveColor 3s ease-in-out infinite;
+            word-break: break-word;
+            hyphens: auto;
         }
         
         @keyframes waveColor {
@@ -113,8 +125,17 @@
             display: flex;
             flex-direction: row;
             align-items: center;
-            gap: 30px;
+            gap: clamp(10px, 3vw, 30px);
             justify-content: center;
+            width: 100%;
+            padding: 0 10px;
+        }
+        
+        @media (max-width: 640px) {
+            .header-left {
+                gap: 8px;
+                flex-wrap: wrap;
+            }
         }
         
         .header-left .logo-container {
@@ -125,7 +146,7 @@
         }
         
         .prisonmike-img {
-            width: 60px;
+            width: clamp(40px, 8vw, 60px);
             height: auto;
             opacity: 0.9;
             transition: transform 0.3s ease;
@@ -134,6 +155,12 @@
         
         .prisonmike-img:hover {
             transform: scale(1.1);
+        }
+        
+        @media (max-width: 640px) {
+            .prisonmike-img {
+                width: clamp(30px, 10vw, 50px);
+            }
         }
         
         .header-right {
@@ -146,17 +173,30 @@
             backdrop-filter: blur(10px);
             border: 1px solid rgba(147, 51, 234, 0.3);
             border-radius: 12px;
-            padding: 20px;
+            padding: clamp(12px, 3vw, 20px);
             display: grid;
             grid-template-columns: repeat(2, 1fr);
-            gap: 20px;
+            gap: clamp(10px, 2vw, 20px);
+        }
+        
+        @media (max-width: 640px) {
+            .features-box {
+                grid-template-columns: 1fr;
+                padding: 15px;
+            }
         }
         
         .features-box h4 {
             color: #c084fc;
             margin-bottom: 8px;
-            font-size: 1em;
+            font-size: clamp(0.9em, 2vw, 1em);
             grid-column: span 1;
+        }
+        
+        @media (max-width: 640px) {
+            .features-box h4 {
+                grid-column: span 1;
+            }
         }
         
         .features-box ul {
@@ -241,7 +281,6 @@
             padding: 20px;
             transition: all 0.3s ease;
             pointer-events: auto;
-        }
         }
         
         .service-card:hover {
@@ -420,6 +459,7 @@
         
         small {
             color: #9ca3af;
+            font-size: clamp(0.7rem, 1.5vw, 0.875rem);
         }
     </style>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/88/three.min.js"></script>
