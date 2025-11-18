@@ -3696,7 +3696,7 @@ async function handleStream(type, id, config, workerOrigin) {
             filteredResults = filteredResults.filter(result => {
                 const match = isExactEpisodeMatch(
                     result.title || result.websiteTitle,
-                    kitsuId ? mediaDetails.titles : mediaDetails.title,
+                    mediaDetails.titles || mediaDetails.title,
                     parseInt(season),
                     parseInt(episode),
                     !!kitsuId
