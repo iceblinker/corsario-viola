@@ -4162,8 +4162,7 @@ async function handleStream(type, id, config, workerOrigin) {
                         imdbId: mediaDetails.imdbId,
                         tmdbId: mediaDetails.tmdbId,
                         italianTitle: italianTitle,
-                        originalTitle: originalTitle,
-                        englishTitle: mediaDetails.title,
+                        originalTitle: originalTitle || mediaDetails.title, // Use English title as fallback
                         type: type,
                         year: mediaDetails.year
                     }),
