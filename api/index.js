@@ -1910,8 +1910,14 @@ function extractImdbId(id) {
 
 async function getTMDBDetailsByImdb(imdbId, tmdbApiKey) {
     try {
-        const response = await fetch(`${TMDB_BASE_URL}/find/${imdbId}?api_key=${tmdbApiKey}&external_source=imdb_id`);
-        if (!response.ok) throw new Error(`TMDB API error: ${response.status}`);
+        const response = await fetch(`${TMDB_BASE_URL}/find/${imdbId}?api_key=${tmdbApiKey}&external_source=imdb_id`, {
+            signal: AbortSignal.timeout(8000)
+        });
+        if (!response.ok) {
+            const errorText = await response.text().catch(() => 'Unable to read error');
+            console.error(`❌ [TMDB] /find/${imdbId} error: ${response.status} - ${errorText.substring(0, 200)}`);
+            throw new Error(`TMDB API error: ${response.status}`);
+        }
         const data = await response.json();
         
         if (data.movie_results?.[0]) {
@@ -1952,8 +1958,14 @@ async function getTMDBDetailsByTmdb(tmdbId, type, tmdbApiKey) {
         const url = `${TMDB_BASE_URL}/${mediaType}/${tmdbId}?api_key=${tmdbApiKey}&append_to_response=external_ids`;
         
         console.log(`🔄 Fetching TMDb details for ${mediaType} ${tmdbId}...`);
-        const response = await fetch(url);
-        if (!response.ok) throw new Error(`TMDB API error: ${response.status}`);
+        const response = await fetch(url, {
+            signal: AbortSignal.timeout(8000)
+        });
+        if (!response.ok) {
+            const errorText = await response.text().catch(() => 'Unable to read error');
+            console.error(`❌ [TMDB] /${mediaType}/${tmdbId} error: ${response.status} - ${errorText.substring(0, 200)}`);
+            throw new Error(`TMDB API error: ${response.status}`);
+        }
         const data = await response.json();
         
         const title = data.title || data.name;
@@ -2094,7 +2106,7 @@ async function enrichDatabaseInBackground(mediaDetails, type, season = null, epi
         if (mediaDetails.imdbId && !mediaDetails.tmdbId) {
             try {
                 console.log(`🔄 [Background] Converting IMDb to TMDb...`);
-                const tmdbKey = process.env.TMDB_KEY || '5462f78469f3d80bf520164529.4c16e4';
+                const tmdbKey = process.env.TMDB_KEY || process.env.TMDB_API_KEY || '5462f78469f3d80bf5201645294c16e4';
                 const tmdbData = await getTMDBDetailsByImdb(mediaDetails.imdbId, tmdbKey);
                 if (tmdbData && tmdbData.tmdbId) {
                     mediaDetails.tmdbId = tmdbData.tmdbId;
@@ -2131,13 +2143,15 @@ async function enrichDatabaseInBackground(mediaDetails, type, season = null, epi
         if (mediaDetails.tmdbId) {
             try {
                 const tmdbType = type === 'series' ? 'tv' : 'movie';
-                const tmdbKey = process.env.TMDB_KEY || '5462f78469f3d80bf520164529.4c16e4';
+                const tmdbKey = process.env.TMDB_KEY || process.env.TMDB_API_KEY || '5462f78469f3d80bf5201645294c16e4';
                 console.log(`🔄 [Background] Using TMDb key: ${tmdbKey.substring(0, 10)}... Type: ${tmdbType}`);
                 
                 // 1. Get ITALIAN title (language=it-IT)
                 const italianUrl = `https://api.themoviedb.org/3/${tmdbType}/${mediaDetails.tmdbId}?api_key=${tmdbKey}&language=it-IT`;
                 console.log(`🔄 [Background] Fetching Italian title from: ${italianUrl.replace(tmdbKey, 'HIDDEN')}`);
-                const italianResponse = await fetch(italianUrl);
+                const italianResponse = await fetch(italianUrl, {
+                    signal: AbortSignal.timeout(8000)
+                });
                 console.log(`🔄 [Background] Italian response status: ${italianResponse.status}`);
                 if (italianResponse.ok) {
                     const italianData = await italianResponse.json();
@@ -2154,7 +2168,9 @@ async function enrichDatabaseInBackground(mediaDetails, type, season = null, epi
                 
                 // 2. Get ORIGINAL title (no language param = original language)
                 const originalUrl = `https://api.themoviedb.org/3/${tmdbType}/${mediaDetails.tmdbId}?api_key=${tmdbKey}`;
-                const originalResponse = await fetch(originalUrl);
+                const originalResponse = await fetch(originalUrl, {
+                    signal: AbortSignal.timeout(8000)
+                });
                 if (originalResponse.ok) {
                     const originalData = await originalResponse.json();
                     originalTitle = originalData.original_title || originalData.original_name;
@@ -4137,10 +4153,12 @@ async function getTMDBDetails(tmdbId, type = 'movie', tmdbApiKey, append = 'exte
     try {
         const url = `${TMDB_BASE_URL}/${type}/${tmdbId}?api_key=${tmdbApiKey}&language=${language}&append_to_response=${append}`;
         console.log(`🔍 [TMDB] Fetching: ${url.replace(tmdbApiKey, 'HIDDEN')}`);
-        const response = await fetch(url);
+        const response = await fetch(url, {
+            signal: AbortSignal.timeout(8000)
+        });
         console.log(`🔍 [TMDB] Response status: ${response.status} ${response.statusText}`);
         if (!response.ok) {
-            const errorText = await response.text();
+            const errorText = await response.text().catch(() => 'Unable to read error');
             console.error(`❌ [TMDB] Error response: ${errorText.substring(0, 200)}`);
             throw new Error(`TMDB API error: ${response.status}`);
         }
@@ -4156,15 +4174,25 @@ async function getTMDBDetails(tmdbId, type = 'movie', tmdbApiKey, append = 'exte
 async function getTVShowDetails(tmdbId, seasonNum, episodeNum, tmdbApiKey) {
     try {
         const showResponse = await fetch(
-            `${TMDB_BASE_URL}/tv/${tmdbId}?api_key=${tmdbApiKey}&append_to_response=external_ids`
+            `${TMDB_BASE_URL}/tv/${tmdbId}?api_key=${tmdbApiKey}&append_to_response=external_ids`,
+            { signal: AbortSignal.timeout(8000) }
         );
-        if (!showResponse.ok) throw new Error(`TMDB API error: ${showResponse.status}`);
+        if (!showResponse.ok) {
+            const errorText = await showResponse.text().catch(() => 'Unable to read error');
+            console.error(`❌ [TMDB] /tv/${tmdbId} error: ${showResponse.status} - ${errorText.substring(0, 200)}`);
+            throw new Error(`TMDB API error: ${showResponse.status}`);
+        }
         const showData = await showResponse.json();
 
         const episodeResponse = await fetch(
-            `${TMDB_BASE_URL}/tv/${tmdbId}/season/${seasonNum}/episode/${episodeNum}?api_key=${tmdbApiKey}`
+            `${TMDB_BASE_URL}/tv/${tmdbId}/season/${seasonNum}/episode/${episodeNum}?api_key=${tmdbApiKey}`,
+            { signal: AbortSignal.timeout(8000) }
         );
-        if (!episodeResponse.ok) throw new Error(`TMDB episode API error: ${episodeResponse.status}`);
+        if (!episodeResponse.ok) {
+            const errorText = await episodeResponse.text().catch(() => 'Unable to read error');
+            console.error(`❌ [TMDB] /tv/${tmdbId}/season/${seasonNum}/episode/${episodeNum} error: ${episodeResponse.status} - ${errorText.substring(0, 200)}`);
+            throw new Error(`TMDB episode API error: ${episodeResponse.status}`);
+        }
         const episodeData = await episodeResponse.json();
 
         return {
