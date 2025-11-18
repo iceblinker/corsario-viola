@@ -4530,11 +4530,15 @@ export default async function handler(req, res) {
     // ✅ Configure endpoint - Opens with existing config preloaded
     if (url.pathname === '/configure' || url.pathname.endsWith('/configure')) {
         try {
-            // Extract config from URL if present (e.g., /{config}/configure)
-            const pathParts = url.pathname.split('/');
             let existingConfig = null;
             
-            // Check if config is in path (/{config}/configure)
+            // DEBUG: Log full request details
+            console.log('🔍 [Configure] Request URL:', url.href);
+            console.log('🔍 [Configure] Pathname:', url.pathname);
+            console.log('🔍 [Configure] Search params:', Array.from(url.searchParams.entries()));
+            
+            // Method 1: Check if config is in path (/{config}/configure)
+            const pathParts = url.pathname.split('/');
             if (pathParts.length >= 2 && pathParts[1] && pathParts[1] !== 'configure') {
                 try {
                     existingConfig = JSON.parse(atob(pathParts[1]));
@@ -4542,6 +4546,23 @@ export default async function handler(req, res) {
                 } catch (e) {
                     console.warn('⚠️ [Configure] Failed to parse config from path:', e.message);
                 }
+            }
+            
+            // Method 2: Check query parameter (Stremio uses ?config=)
+            if (!existingConfig && url.searchParams.has('config')) {
+                try {
+                    const configParam = url.searchParams.get('config');
+                    existingConfig = JSON.parse(atob(configParam));
+                    console.log('📝 [Configure] Loaded existing config from query parameter');
+                } catch (e) {
+                    console.warn('⚠️ [Configure] Failed to parse config from query:', e.message);
+                }
+            }
+            
+            if (existingConfig) {
+                console.log('✅ [Configure] Config loaded:', Object.keys(existingConfig));
+            } else {
+                console.log('ℹ️ [Configure] No existing config found - showing blank form');
             }
             
             // Read template and inject existing config as JSON
@@ -4569,6 +4590,29 @@ export default async function handler(req, res) {
         }
     }
 
+    // ✅ Serve static logo files
+    if (url.pathname === '/logo.png' || url.pathname === '/prisonmike.png') {
+        try {
+            const filename = url.pathname.slice(1); // Remove leading /
+            const logoPath = path.join(process.cwd(), 'public', filename);
+            
+            try {
+                const logoData = await fs.readFile(logoPath);
+                res.setHeader('Content-Type', 'image/png');
+                res.setHeader('Cache-Control', 'public, max-age=31536000');
+                return res.status(200).send(logoData);
+            } catch (err) {
+                // Fallback: serve a simple placeholder
+                console.warn(`⚠️ Logo file not found: ${filename}`);
+                res.setHeader('Content-Type', 'text/plain');
+                return res.status(404).send('Logo not found');
+            }
+        } catch (e) {
+            console.error('Error serving logo:', e);
+            return res.status(500).send('Error serving logo');
+        }
+    }
+
     // ✅ MediaFlow Proxy Endpoint - Server-side proxying
     try {
         // Stremio manifest
@@ -4576,7 +4620,7 @@ export default async function handler(req, res) {
         if (url.pathname.endsWith('/manifest.json')) {
             const manifest = {
                 id: 'community.ilcorsaroviola..ita',
-                version: '2.0.0',
+                version: '1.0.0',
                 name: 'IlCorsaroViola',
                 description: 'Streaming da UIndex, CorsaroNero DB local, Knaben e Jackettio con o senza Real-Debrid, Torbox e Alldebrid.',
                 logo: `${url.origin}/logo.png`,
@@ -6226,8 +6270,8 @@ export default async function handler(req, res) {
         if (url.pathname === '/health') {
             const health = {
                 status: 'OK',
-                addon: 'Stremizio (Vercel)',
-                version: '2.0.0',
+                addon: 'IlCorsaroViola',
+                version: '1.0.0',
                 uptime: Date.now(),
                 cache: {
                     entries: cache.size,
