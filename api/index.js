@@ -2583,6 +2583,10 @@ function isExactEpisodeMatch(torrentTitle, showTitleOrTitles, seasonNum, episode
         .trim();
     
     const titlesToCheck = Array.isArray(showTitleOrTitles) ? showTitleOrTitles : [showTitleOrTitles];
+    
+    const isDebugTarget = torrentTitle.toLowerCase().includes('scissione') && 
+                          torrentTitle.toLowerCase().includes('s01e01') && 
+                          torrentTitle.toLowerCase().includes('2160p');
 
     // ✅ STEP 3: Check if title matches
     const titleIsAMatch = titlesToCheck.some(showTitle => {
@@ -2602,11 +2606,23 @@ function isExactEpisodeMatch(torrentTitle, showTitleOrTitles, seasonNum, episode
         );
         
         const percentageMatch = matchingWords.length / showWords.length;
+        
+        if (isDebugTarget) {
+            console.log(`    🔍 Title match: showTitle="${showTitle}", showWords=[${showWords.join(',')}], matchingWords=[${matchingWords.join(',')}], percentage=${percentageMatch}`);
+        }
+        
         return percentageMatch >= 0.6;
     });
     
     if (!titleIsAMatch) {
+        if (isDebugTarget) {
+            console.log(`    ❌ Title matching FAILED for "${torrentTitle.substring(0,60)}"`);
+        }
         return false;
+    }
+    
+    if (isDebugTarget) {
+        console.log(`    ✅ Title matching PASSED, checking episode patterns...`);
     }
     
     if (isAnime) {
@@ -2695,6 +2711,14 @@ function isExactEpisodeMatch(torrentTitle, showTitleOrTitles, seasonNum, episode
         new RegExp(`s${seasonStr}\.?e${episodeStr}`, 'i'),
         new RegExp(`${seasonStr}${episodeStr}`, 'i')
     ];
+    
+    if (isDebugTarget) {
+        console.log(`    🔍 Testing episode patterns on normalized: "${normalizedTorrentTitle.substring(0,80)}"`);
+        exactEpisodePatterns.forEach((pattern, i) => {
+            const match = pattern.test(normalizedTorrentTitle);
+            console.log(`      Pattern ${i+1}: ${pattern} → ${match ? '✅ MATCH' : '❌ no match'}`);
+        });
+    }
     
     const exactMatch = exactEpisodePatterns.some(pattern => pattern.test(normalizedTorrentTitle));
     if (exactMatch) {
