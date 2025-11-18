@@ -2146,26 +2146,27 @@ async function enrichDatabaseInBackground(mediaDetails, type, season = null, epi
         
         // �🇹 Get ITALIAN title and ORIGINAL title from TMDB (critical for Italian content!)
         // Use provided titles if available to avoid redundant API calls
-        let italianTitle = providedItalianTitle || null;
-        let originalTitle = providedOriginalTitle || null;
+        // Note: italianTitle and originalTitle are function parameters, use them directly
+        let finalItalianTitle = italianTitle || null;
+        let finalOriginalTitle = originalTitle || null;
         
-        if (italianTitle) {
-            console.log(`🔄 [Background] Using provided Italian title: "${italianTitle}"`);
+        if (finalItalianTitle) {
+            console.log(`🔄 [Background] Using provided Italian title: "${finalItalianTitle}"`);
         }
-        if (originalTitle) {
-            console.log(`🔄 [Background] Using provided Original title: "${originalTitle}"`);
+        if (finalOriginalTitle) {
+            console.log(`🔄 [Background] Using provided Original title: "${finalOriginalTitle}"`);
         }
         
         // Only fetch from TMDB if we don't have the titles yet
-        if ((!italianTitle || !originalTitle) && mediaDetails.tmdbId) {
-            console.log(`🔄 [Background] Fetching missing titles from TMDB (Italian: ${!italianTitle}, Original: ${!originalTitle})`);
+        if ((!finalItalianTitle || !finalOriginalTitle) && mediaDetails.tmdbId) {
+            console.log(`🔄 [Background] Fetching missing titles from TMDB (Italian: ${!finalItalianTitle}, Original: ${!finalOriginalTitle})`);
             try {
                 const tmdbType = type === 'series' ? 'tv' : 'movie';
                 const tmdbKey = process.env.TMDB_KEY || process.env.TMDB_API_KEY || '5462f78469f3d80bf5201645294c16e4';
                 console.log(`🔄 [Background] Using TMDb key: ${tmdbKey.substring(0, 10)}... Type: ${tmdbType}`);
                 
                 // 1. Get ITALIAN title (language=it-IT) if not provided
-                if (!italianTitle) {
+                if (!finalItalianTitle) {
                     const italianUrl = `https://api.themoviedb.org/3/${tmdbType}/${mediaDetails.tmdbId}?api_key=${tmdbKey}&language=it-IT`;
                     console.log(`🔄 [Background] Fetching Italian title from: ${italianUrl.replace(tmdbKey, 'HIDDEN')}`);
                     const italianResponse = await fetch(italianUrl, {
@@ -2174,12 +2175,12 @@ async function enrichDatabaseInBackground(mediaDetails, type, season = null, epi
                     console.log(`🔄 [Background] Italian response status: ${italianResponse.status}`);
                     if (italianResponse.ok) {
                         const italianData = await italianResponse.json();
-                        italianTitle = italianData.title || italianData.name;
+                        finalItalianTitle = italianData.title || italianData.name;
                         console.log(`🔄 [Background] Italian data received. Title field: ${italianData.title}, Name field: ${italianData.name}`);
-                        if (italianTitle && italianTitle !== mediaDetails.title) {
-                            console.log(`🇮🇹 [Background] Found Italian title: "${italianTitle}"`);
+                        if (finalItalianTitle && finalItalianTitle !== mediaDetails.title) {
+                            console.log(`🇮🇹 [Background] Found Italian title: "${finalItalianTitle}"`);
                         } else {
-                            console.log(`⚠️ [Background] Italian title same as English or null: "${italianTitle}"`);
+                            console.log(`⚠️ [Background] Italian title same as English or null: "${finalItalianTitle}"`);
                         }
                     } else {
                         console.error(`❌ [Background] Italian title fetch failed: ${italianResponse.status} ${italianResponse.statusText}`);
@@ -2187,16 +2188,16 @@ async function enrichDatabaseInBackground(mediaDetails, type, season = null, epi
                 }
                 
                 // 2. Get ORIGINAL title (no language param = original language) if not provided
-                if (!originalTitle) {
+                if (!finalOriginalTitle) {
                     const originalUrl = `https://api.themoviedb.org/3/${tmdbType}/${mediaDetails.tmdbId}?api_key=${tmdbKey}`;
                     const originalResponse = await fetch(originalUrl, {
                         signal: AbortSignal.timeout(8000)
                     });
                     if (originalResponse.ok) {
                         const originalData = await originalResponse.json();
-                        originalTitle = originalData.original_title || originalData.original_name;
-                        if (originalTitle && originalTitle !== mediaDetails.title && originalTitle !== italianTitle) {
-                            console.log(`🌍 [Background] Found original title: "${originalTitle}"`);
+                        finalOriginalTitle = originalData.original_title || originalData.original_name;
+                        if (finalOriginalTitle && finalOriginalTitle !== mediaDetails.title && finalOriginalTitle !== finalItalianTitle) {
+                            console.log(`🌍 [Background] Found original title: "${finalOriginalTitle}"`);
                         }
                     }
                 }
@@ -2208,23 +2209,23 @@ async function enrichDatabaseInBackground(mediaDetails, type, season = null, epi
             console.warn(`⚠️ [Background] No TMDb ID available, cannot fetch Italian title`);
         }
         
-        console.log(`🔄 [Background] Title fetching complete. Italian: "${italianTitle}", Original: "${originalTitle}"`);
+        console.log(`🔄 [Background] Title fetching complete. Italian: "${finalItalianTitle}", Original: "${finalOriginalTitle}"`);
         
         // 🎯 SIMPLIFIED SEARCH: Solo titoli base (senza stagioni/episodi specifici)
         // Questo permette di trovare TUTTI i torrent e aggiungerli al DB
         const searchQueries = [];
         
         // 🇮🇹 PRIORITY 1: Italian title (MOST IMPORTANT for CorsaroNero!)
-        if (italianTitle && italianTitle !== mediaDetails.title) {
-            searchQueries.push(italianTitle);
+        if (finalItalianTitle && finalItalianTitle !== mediaDetails.title) {
+            searchQueries.push(finalItalianTitle);
         }
         
         // 🇬🇧 PRIORITY 2: English title
         searchQueries.push(mediaDetails.title);
         
         // 🌍 PRIORITY 3: Original title (if different from both)
-        if (originalTitle && originalTitle !== mediaDetails.title && originalTitle !== italianTitle) {
-            searchQueries.push(originalTitle);
+        if (finalOriginalTitle && finalOriginalTitle !== mediaDetails.title && finalOriginalTitle !== finalItalianTitle) {
+            searchQueries.push(finalOriginalTitle);
         }
         
         console.log(`🔄 [Background] Simple search queries (all content):`, searchQueries);
@@ -3240,8 +3241,9 @@ async function handleStream(type, id, config, workerOrigin) {
             console.log(`✅ [3-Tier] Found ${dbResults.length} results from DB/FTS (Tier 1/2)`);
             console.log(`⏭️  [3-Tier] Skipping live search (Tier 3) - will use cached results`);
             
-            // DB/FTS results will be merged into allRawResults below
-            // Enrichment will run at the end (for all tiers)
+            // ✅ PROCESS DB/FTS RESULTS: Use them as the results array
+            // This skips live search and processes DB results through filtering/cache check
+            allRawResults.push(...dbResults);
             
         } else {
             console.log(`🔍 [3-Tier] No results from DB/FTS (Tier 1/2) - proceeding to live search (Tier 3)`);
