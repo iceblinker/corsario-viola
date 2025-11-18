@@ -4590,11 +4590,14 @@ export default async function handler(req, res) {
         }
     }
 
-    // ✅ Serve static logo files
-    if (url.pathname === '/logo.png' || url.pathname === '/prisonmike.png') {
+    // ✅ Serve static logo files (with or without config prefix)
+    if (url.pathname.endsWith('/logo.png') || url.pathname.endsWith('/prisonmike.png')) {
         try {
-            const filename = url.pathname.slice(1); // Remove leading /
+            // Extract filename from end of path
+            const filename = url.pathname.endsWith('/logo.png') ? 'logo.png' : 'prisonmike.png';
             const logoPath = path.join(process.cwd(), 'public', filename);
+            
+            console.log(`🖼️ [Logo] Serving ${filename} from ${logoPath}`);
             
             try {
                 const logoData = await fs.readFile(logoPath);
@@ -4602,8 +4605,7 @@ export default async function handler(req, res) {
                 res.setHeader('Cache-Control', 'public, max-age=31536000');
                 return res.status(200).send(logoData);
             } catch (err) {
-                // Fallback: serve a simple placeholder
-                console.warn(`⚠️ Logo file not found: ${filename}`);
+                console.warn(`⚠️ Logo file not found: ${filename}`, err.message);
                 res.setHeader('Content-Type', 'text/plain');
                 return res.status(404).send('Logo not found');
             }
