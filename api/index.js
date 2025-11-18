@@ -643,7 +643,7 @@ class Jackettio {
             console.log(`🔍 [Jackettio] Torznab search for: "${query}" (category: ${category || 'all'}) ${italianOnly ? '[ITALIAN ONLY]' : ''}`);
             
             const headers = {
-                'User-Agent': 'Stremizio/2.0',
+                'User-Agent': 'ilcorsaroviola/2.0',
                 'Accept': 'application/json, application/xml, text/xml'
             };
             
@@ -4533,10 +4533,10 @@ export default async function handler(req, res) {
         // Gestisce sia /manifest.json che /{config}/manifest.json
         if (url.pathname.endsWith('/manifest.json')) {
             const manifest = {
-                id: 'community.stremizio.plus.ita',
+                id: 'community.ilcorsaroviola..ita',
                 version: '2.0.0',
-                name: 'Stremizio 2.0',
-                description: 'Streaming da UIndex, CorsaroNero, Knaben e Jackettio con o senza Real-Debrid.',
+                name: 'IlCorsaroViola',
+                description: 'Streaming da UIndex, CorsaroNero DB local, Knaben e Jackettio con o senza Real-Debrid, Torbox e Alldebrid.',
                 logo: `${url.origin}/logo.png`,
                 resources: ['stream'],
                 types: ['movie', 'series', 'anime'],
