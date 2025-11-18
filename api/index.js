@@ -3236,15 +3236,11 @@ async function handleStream(type, id, config, workerOrigin) {
             }
         }
 
-        // ✅ 3-TIER STRATEGY: Skip live search if DB/FTS already returned results
-        if (dbResults.length > 0) {
+        // ✅ 3-TIER STRATEGY: Check if we should skip live search
+        const skipLiveSearch = dbResults.length > 0;
+        if (skipLiveSearch) {
             console.log(`✅ [3-Tier] Found ${dbResults.length} results from DB/FTS (Tier 1/2)`);
             console.log(`⏭️  [3-Tier] Skipping live search (Tier 3) - will use cached results`);
-            
-            // ✅ PROCESS DB/FTS RESULTS: Use them as the results array
-            // This skips live search and processes DB results through filtering/cache check
-            allRawResults.push(...dbResults);
-            
         } else {
             console.log(`🔍 [3-Tier] No results from DB/FTS (Tier 1/2) - proceeding to live search (Tier 3)`);
         }
@@ -3253,7 +3249,7 @@ async function handleStream(type, id, config, workerOrigin) {
         const searchQueries = [];
         
         // Skip live search if we already have results
-        if (dbResults.length > 0) {
+        if (skipLiveSearch) {
             console.log(`⏭️  [3-Tier] Skipping live search query building - will process ${dbResults.length} cached results`);
             // searchQueries remains empty - no live search needed
         } else {
@@ -3365,12 +3361,19 @@ async function handleStream(type, id, config, workerOrigin) {
 
         // --- NUOVA LOGICA DI AGGREGAZIONE E DEDUPLICAZIONE ---
         const allRawResults = [];
+        
+        // ✅ Add DB/FTS results first (if any)
+        if (skipLiveSearch) {
+            console.log(`✅ [3-Tier] Adding ${dbResults.length} DB/FTS results to processing pipeline`);
+            allRawResults.push(...dbResults);
+        }
+        
         const searchType = kitsuId ? 'anime' : type;
         const TOTAL_RESULTS_TARGET = 50; // Stop searching when we have enough results to avoid excessive subrequests.
         let totalQueries = 0;
         
         // Only perform live search if no DB/FTS results
-        if (dbResults.length === 0) {
+        if (!skipLiveSearch) {
             console.log(`🔍 [3-Tier] Starting live search (Tier 3)...`);
 
         // ✅ Initialize Jackettio if ENV vars are set
