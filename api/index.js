@@ -2564,6 +2564,12 @@ async function fetchUIndexData(searchQuery, type = 'movie', italianTitle = null)
 function isExactEpisodeMatch(torrentTitle, showTitleOrTitles, seasonNum, episodeNum, isAnime = false) {
     if (!torrentTitle || !showTitleOrTitles) return false;
     
+    // DEBUG: Log rejected single episodes
+    if (torrentTitle.includes('155da22a') || torrentTitle.includes('3d700a66') || 
+        (torrentTitle.toLowerCase().includes('scissione') && torrentTitle.toLowerCase().includes('s01e01') && torrentTitle.toLowerCase().includes('2160p'))) {
+        console.log(`🔍 [Match Debug] Checking: "${torrentTitle.substring(0,80)}" for S${seasonNum}E${episodeNum}`);
+    }
+    
     // ✅ STEP 1: Light cleaning (keep dots and dashes for episode ranges!)
     const lightCleanedTitle = torrentTitle
         .replace(/<[^>]*>/g, '')
