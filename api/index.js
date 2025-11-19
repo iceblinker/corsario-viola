@@ -2870,6 +2870,91 @@ function isExactMovieMatch(torrentTitle, movieTitle, year) {
     return yearMatches;
 }
 
+/**
+ * Match the best file in a pack torrent for a specific movie
+ * @param {Array} files - Array of files from torrent info
+ * @param {Object} movieDetails - Movie details (title, originalTitle, year)
+ * @returns {number|null} - Best matching file index or null
+ */
+function matchPackFile(files, movieDetails) {
+    if (!files || files.length === 0) return null;
+    
+    const { title, originalTitle, year } = movieDetails;
+    console.log(`🎯 [Pack] Matching file for: ${title} (${originalTitle}) [${year}]`);
+    
+    // Normalize titles for comparison
+    const normalizeTitle = (str) => str.toLowerCase()
+        .replace(/[^\w\s]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+    
+    const italianWords = normalizeTitle(title).split(' ');
+    const englishWords = originalTitle ? normalizeTitle(originalTitle).split(' ') : [];
+    
+    let bestScore = 0;
+    let bestFileIndex = null;
+    
+    files.forEach((file, index) => {
+        const filename = normalizeTitle(file.path || '');
+        let score = 0;
+        
+        // Skip non-video files
+        const videoExtensions = /\.(mkv|mp4|avi|mov|wmv|flv|webm|m4v)$/i;
+        if (!videoExtensions.test(file.path)) {
+            return;
+        }
+        
+        // Level 1: Title match (70% of score)
+        // Italian title: 40%
+        const italianMatches = italianWords.filter(word => 
+            word.length > 2 && filename.includes(word)
+        ).length;
+        const italianScore = (italianMatches / italianWords.length) * 0.4;
+        score += italianScore;
+        
+        // English title: 30%
+        if (englishWords.length > 0) {
+            const englishMatches = englishWords.filter(word => 
+                word.length > 2 && filename.includes(word)
+            ).length;
+            const englishScore = (englishMatches / englishWords.length) * 0.3;
+            score += englishScore;
+        }
+        
+        // Level 2: Sequence number match (20% of score)
+        // Extract part numbers: "Part II", "Parte 2", "II", "2", etc.
+        const partMatch = filename.match(/\b(?:part|parte|chapter|capitolo)?\s*([ivxIVX]+|[0-9]+)\b/);
+        if (partMatch) {
+            const partNum = partMatch[1];
+            // Check if this number/numeral appears in the title
+            if (title.includes(partNum) || (originalTitle && originalTitle.includes(partNum))) {
+                score += 0.2;
+            }
+        }
+        
+        // Level 3: Year match (10% of score)
+        const yearMatch = filename.match(/\b(19[2-9]\d|20[0-3]\d)\b/);
+        if (yearMatch && yearMatch[1] === year.toString()) {
+            score += 0.1;
+        }
+        
+        console.log(`📁 [Pack] File ${index}: ${file.path.substring(0, 50)}... - Score: ${(score * 100).toFixed(1)}%`);
+        
+        if (score > bestScore) {
+            bestScore = score;
+            bestFileIndex = index;
+        }
+    });
+    
+    if (bestFileIndex !== null) {
+        console.log(`✅ [Pack] Best match: File ${bestFileIndex} (${files[bestFileIndex].path}) - Score: ${(bestScore * 100).toFixed(1)}%`);
+    } else {
+        console.log(`❌ [Pack] No suitable file found in pack`);
+    }
+    
+    return bestFileIndex;
+}
+
 // ✅ Enhanced stream handler with better error handling and logging
 async function handleStream(type, id, config, workerOrigin) {
     maybeCleanupCache();
@@ -3928,6 +4013,32 @@ async function handleStream(type, id, config, workerOrigin) {
         await Promise.all(cacheChecks);
         
         console.log(`✅ Cache check complete. RD: ${rdUserTorrents.length} torrents, Torbox: ${torboxUserTorrents.length} torrents, AllDebrid: ${Object.keys(adCacheResults).length} hashes`);
+        
+        // ✅ PACK FILE MATCHING: For movies with pack torrents, determine best file
+        if (type === 'movie' && mediaDetails) {
+            console.log(`\n🎯 [Pack] Checking for pack torrents in ${filteredResults.length} results...`);
+            
+            for (const result of filteredResults) {
+                // Detect if this is a pack (has all_imdb_ids or matches pack pattern)
+                const isPack = /\b(trilog|saga|collection|collezione|pack|completa|integrale|filmografia)\b/i.test(result.title) ||
+                               /\b(19[2-9]\d|20[0-3]\d)-(19[2-9]\d|20[0-3]\d)\b/.test(result.title);
+                
+                if (isPack) {
+                    console.log(`📦 [Pack] Detected pack: "${result.title}"`);
+                    
+                    // Try to get torrent info to access file list
+                    // We'll do this lazily when user clicks, but we can mark it as a pack
+                    result.isPack = true;
+                    
+                    // For now, we'll handle file selection in the stream endpoint
+                    // The stream endpoint will need to:
+                    // 1. Add magnet to RD/Torbox
+                    // 2. Get torrent info (file list)
+                    // 3. Call matchPackFile() to find best file
+                    // 4. Select that specific file
+                }
+            }
+        }
         
         // ✅ Build streams with enhanced error handling - supports multiple debrid services
         const streams = [];
