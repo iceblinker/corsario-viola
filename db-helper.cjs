@@ -697,9 +697,10 @@ async function searchPacksByImdbId(imdbId) {
         t.provider,
         t.title,
         t.size,
-        t.quality,
         t.type,
-        t.all_imdb_ids,
+        t.seeders,
+        t.cached_rd,
+        t.last_cached_check,
         pf.file_index,
         pf.file_path,
         pf.file_size,
@@ -707,7 +708,7 @@ async function searchPacksByImdbId(imdbId) {
       FROM torrents t
       INNER JOIN pack_files pf ON t.info_hash = pf.pack_hash
       WHERE pf.imdb_id = $1
-      ORDER BY t.size DESC
+      ORDER BY t.seeders DESC, t.size DESC
     `;
     
     const result = await pool.query(query, [imdbId]);
