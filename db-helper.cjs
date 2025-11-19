@@ -783,6 +783,56 @@ async function getPackFiles(packHash) {
   }
 }
 
+/**
+ * Update all_imdb_ids of a pack torrent with all IMDb IDs found in pack_files
+ * @param {string} packHash - InfoHash of the pack
+ * @returns {Promise<boolean>} Success status
+ */
+async function updatePackAllImdbIds(packHash) {
+  if (!pool) throw new Error('Database not initialized');
+  
+  try {
+    // Get all IMDb IDs for this pack
+    const filesQuery = `
+      SELECT DISTINCT imdb_id 
+      FROM pack_files 
+      WHERE pack_hash = $1
+      ORDER BY imdb_id
+    `;
+    
+    const filesResult = await pool.query(filesQuery, [packHash]);
+    
+    if (filesResult.rows.length === 0) {
+      console.log(`   ⚠️  No IMDb IDs found in pack_files for ${packHash}`);
+      return false;
+    }
+    
+    const imdbIds = filesResult.rows.map(row => row.imdb_id);
+    console.log(`   📝 Updating pack ${packHash} with IMDb IDs: ${imdbIds.join(', ')}`);
+    
+    // Update torrents table with all_imdb_ids
+    const updateQuery = `
+      UPDATE torrents 
+      SET all_imdb_ids = $1
+      WHERE info_hash = $2
+    `;
+    
+    const result = await pool.query(updateQuery, [JSON.stringify(imdbIds), packHash]);
+    
+    if (result.rowCount > 0) {
+      console.log(`   ✅ Updated all_imdb_ids for pack ${packHash}`);
+      return true;
+    } else {
+      console.log(`   ⚠️  Pack ${packHash} not found in torrents table`);
+      return false;
+    }
+    
+  } catch (error) {
+    console.error(`❌ Error updating pack all_imdb_ids:`, error.message);
+    return false;
+  }
+}
+
 module.exports = {
   initDatabase,
   searchByImdbId,
@@ -800,5 +850,6 @@ module.exports = {
   searchPacksByImdbId,
   insertPackFiles,
   getPackFiles,
+  updatePackAllImdbIds,
   closeDatabase
 };
