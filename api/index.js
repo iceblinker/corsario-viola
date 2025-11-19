@@ -3897,6 +3897,13 @@ async function handleStream(type, id, config, workerOrigin) {
             filteredResults = filteredResults.filter(result => {
                 const torrentTitle = result.title || result.websiteTitle;
                 
+                // 🎯 SKIP YEAR FILTERING FOR PACKS (they contain multiple movies with different years)
+                // Packs are identified by having a fileIndex (from pack_files table)
+                if (result.fileIndex !== null && result.fileIndex !== undefined) {
+                    console.log(`🎬 [Pack] SKIP year filter for pack: ${torrentTitle.substring(0, 60)}... (fileIndex=${result.fileIndex})`);
+                    return true; // Always keep packs, they're already filtered by IMDb ID in DB query
+                }
+                
                 // Try matching with English title
                 const mainTitleMatch = isExactMovieMatch(
                     torrentTitle,
