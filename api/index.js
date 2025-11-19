@@ -4070,8 +4070,12 @@ async function handleStream(type, id, config, workerOrigin) {
                     
                     // ✅ UNIFIED ENDPOINT: Always use /rd-stream/ with magnet link
                     // For series, add season/episode info for pattern matching in packs
+                    // For movie packs, add fileIdx for specific file selection
                     if (type === 'series' && season && episode) {
                         streamUrl = `${workerOrigin}/rd-stream/${encodedConfig}/${encodeURIComponent(result.magnetLink)}/${season}/${episode}`;
+                    } else if (type === 'movie' && result.fileIndex !== undefined && result.fileIndex !== null) {
+                        // Movie pack: add fileIdx to URL
+                        streamUrl = `${workerOrigin}/rd-stream/${encodedConfig}/${encodeURIComponent(result.magnetLink)}/pack/${result.fileIndex}`;
                     } else {
                         streamUrl = `${workerOrigin}/rd-stream/${encodedConfig}/${encodeURIComponent(result.magnetLink)}`;
                     }
@@ -4858,12 +4862,32 @@ export default async function handler(req, res) {
             const pathParts = url.pathname.split('/');
             const encodedConfigStr = pathParts[2];
             const encodedMagnet = pathParts[3];
-            const season = pathParts[4] ? parseInt(pathParts[4]) : null; // Season number (for pattern matching in packs)
-            const episode = pathParts[5] ? parseInt(pathParts[5]) : null; // Episode number (for pattern matching in packs)
-            const workerOrigin = url.origin;
+            const seasonOrPackFlag = pathParts[4] ? pathParts[4] : null; // 'pack' or season number
+            const episodeOrFileIdx = pathParts[5] ? parseInt(pathParts[5]) : null; // episode number or fileIdx for pack
             
-            // Determine type from presence of season/episode
-            const type = (season !== null && episode !== null) ? 'series' : 'movie';
+            // Determine type and extract parameters
+            let type, season, episode, packFileIdx;
+            if (seasonOrPackFlag === 'pack') {
+                // Movie pack: /rd-stream/config/magnet/pack/0
+                type = 'movie';
+                packFileIdx = episodeOrFileIdx;
+                season = null;
+                episode = null;
+            } else if (seasonOrPackFlag !== null && episodeOrFileIdx !== null) {
+                // Series: /rd-stream/config/magnet/1/5
+                type = 'series';
+                season = parseInt(seasonOrPackFlag);
+                episode = episodeOrFileIdx;
+                packFileIdx = null;
+            } else {
+                // Single movie: /rd-stream/config/magnet
+                type = 'movie';
+                season = null;
+                episode = null;
+                packFileIdx = null;
+            }
+            
+            const workerOrigin = url.origin;
             
             // Initialize database for cache tracking
             let dbEnabled = false;
@@ -4954,8 +4978,22 @@ export default async function handler(req, res) {
                         })
                         .sort((a, b) => b.bytes - a.bytes);
                     
-                    // ✅ For series episodes, use pattern matching to find the correct file
-                    if (season && episode) {
+                    // ✅ PRIORITY 1: For movie packs, use packFileIdx if provided
+                    if (type === 'movie' && packFileIdx !== null && packFileIdx !== undefined) {
+                        console.log(`[RealDebrid] 🎬 Pack movie - selecting file at index ${packFileIdx}`);
+                        targetFile = videoFiles[packFileIdx];
+                        if (targetFile) {
+                            console.log(`[RealDebrid] ✅ Selected pack file [${packFileIdx}]: ${targetFile.path} (${(targetFile.bytes / 1024 / 1024).toFixed(0)}MB)`);
+                        } else {
+                            console.log(`[RealDebrid] ❌ Pack file index ${packFileIdx} not found! Available: ${videoFiles.length} files`);
+                            videoFiles.forEach((f, i) => {
+                                console.log(`  [${i}] ${f.path.split('/').pop()} (${(f.bytes / 1024 / 1024).toFixed(0)}MB)`);
+                            });
+                        }
+                    }
+                    
+                    // ✅ PRIORITY 2: For series episodes, use pattern matching to find the correct file
+                    if (!targetFile && season && episode) {
                         const seasonStr = String(season).padStart(2, '0');
                         const episodeStr = String(episode).padStart(2, '0');
                         console.log(`[RealDebrid] 🔍 Looking for S${seasonStr}E${episodeStr} (patterns: s${seasonStr}e${episodeStr}, ${season}x${episodeStr}, ${season}x${episode}, episodio.${episode})`);
