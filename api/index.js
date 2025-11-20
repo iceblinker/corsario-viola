@@ -2710,24 +2710,19 @@ function isExactEpisodeMatch(torrentTitle, showTitleOrTitles, seasonNum, episode
         const absEpisodeNumStr = String(useAbsoluteEpisode);
         
         // Check for single episode match on light cleaned title
-        // Try BOTH absolute episode AND season/episode format
-        const animePatterns = [
-            // Absolute episode patterns (for "One Piece 141" or "Naruto - 141")
-            new RegExp(`\\b${useAbsoluteEpisode}\\b(?!p|i|\\.|bit)`, 'i'),
-            new RegExp(`\\be${absEpisodeStr}\\b(?!\\d)`, 'i'),
-            new RegExp(`\\be${absEpisodeNumStr}\\b(?!\\d)`, 'i'),
+        // ONLY try absolute episode patterns (e.g., "One Piece 141" or "Naruto - 141")
+        // NOT season/episode patterns because those will be in ranges (S03e01-22, S05E131-143)
+        const singleEpisodePatterns = [
+            new RegExp(`\\b${useAbsoluteEpisode}\\b(?!p|i|\\.|bit|-)`, 'i'), // " 141 " but not "141-195" or "1080p"
+            new RegExp(`\\be${absEpisodeStr}\\b(?!\\d|-)`, 'i'),  // "E141" but not "E141-195"
+            new RegExp(`\\be${absEpisodeNumStr}\\b(?!\\d|-)`, 'i'), // "E141" but not "E1410"
             new RegExp(`\\s-\\s${absEpisodeStr}\\b`, 'i'),
-            new RegExp(`\\s-\\s${absEpisodeNumStr}\\b`, 'i'),
-            // Season/Episode patterns (for "S01E05" when using relative numbering)
-            new RegExp(`\\be${episodeStr}\\b(?!\\d)`, 'i'),
-            new RegExp(`\\be${episodeNumStr}\\b(?!\\d)`, 'i'),
-            new RegExp(`\\s-\\s${episodeStr}\\b`, 'i'),
-            new RegExp(`\\s-\\s${episodeNumStr}\\b`, 'i')
+            new RegExp(`\\s-\\s${absEpisodeNumStr}\\b`, 'i')
         ];
         
-        const singleMatch = animePatterns.some(pattern => pattern.test(lightCleanedTitle));
+        const singleMatch = singleEpisodePatterns.some(pattern => pattern.test(lightCleanedTitle));
         if (singleMatch) {
-            console.log(`✅ [ANIME] Single episode match for "${torrentTitle.substring(0, 80)}" Ep.${episodeNum} (abs: ${useAbsoluteEpisode})`);
+            console.log(`✅ [ANIME] Single episode match for "${torrentTitle.substring(0, 80)}" Ep.${useAbsoluteEpisode} (absolute)`);
             return true;
         }
         
@@ -2769,15 +2764,19 @@ function isExactEpisodeMatch(torrentTitle, showTitleOrTitles, seasonNum, episode
                 }
                 
                 // ✅ CRITICAL: Check BOTH absolute episode AND season/episode format!
-                // Because torrents are inconsistent (One Piece: S05E131-143 vs Attack on Titan: S03e01-22)
-                const matchesAbsolute = useAbsoluteEpisode >= startEp && useAbsoluteEpisode <= endEp;
-                const matchesSeasonEp = episodeNum >= startEp && episodeNum <= endEp;
+                // Because torrents are inconsistent:
+                // - One Piece: "S05E131-143" (absolute episodes 131-143)
+                // - Attack on Titan: "S03e01-22" (season episodes 1-22)
                 
+                // 1. Check if ABSOLUTE episode is in range (for One Piece style)
+                const matchesAbsolute = useAbsoluteEpisode >= startEp && useAbsoluteEpisode <= endEp;
                 if (matchesAbsolute) {
                     console.log(`✅ [ANIME RANGE] "${torrentTitle.substring(0, 80)}" range ${startEp}-${endEp} contains ABSOLUTE ep.${useAbsoluteEpisode}`);
                     return true;
                 }
                 
+                // 2. Check if SEASON episode is in range (for Attack on Titan style)
+                const matchesSeasonEp = episodeNum >= startEp && episodeNum <= endEp;
                 if (matchesSeasonEp) {
                     console.log(`✅ [ANIME RANGE] "${torrentTitle.substring(0, 80)}" range ${startEp}-${endEp} contains SEASON ep.${episodeNum}`);
                     return true;
