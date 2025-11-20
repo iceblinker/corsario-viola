@@ -2700,9 +2700,17 @@ function isExactEpisodeMatch(torrentTitle, showTitleOrTitles, seasonNum, episode
         const absEpisodeStr = String(useAbsoluteEpisode).padStart(2, '0');
         const absEpisodeNumStr = String(useAbsoluteEpisode);
         
+        // ✅ CRITICAL: Extract season number from torrent title
+        // Must verify season matches before accepting episode match!
+        const torrentSeasonMatch = lightCleanedTitle.match(/[Ss](\d{1,2})(?:[Ee]\d|\s|$)/);
+        const torrentSeason = torrentSeasonMatch ? parseInt(torrentSeasonMatch[1]) : null;
+        
+        console.log(`🔍 [ANIME SEASON] Torrent has season: ${torrentSeason || 'NONE'}, requested: S${seasonNum}E${episodeNum} (abs: ${useAbsoluteEpisode})`);
+        
         // Check for single episode match on light cleaned title
         // ONLY try absolute episode patterns (e.g., "One Piece 141" or "Naruto - 141")
         // NOT season/episode patterns because those will be in ranges (S03e01-22, S05E131-143)
+        // ⚠️ CRITICAL: Only accept if NO season indicator in title OR season matches!
         const singleEpisodePatterns = [
             new RegExp(`\\b${useAbsoluteEpisode}\\b(?!p|i|\\.|bit|-)`, 'i'), // " 141 " but not "141-195" or "1080p"
             new RegExp(`\\be${absEpisodeStr}\\b(?!\\d|-)`, 'i'),  // "E141" but not "E141-195"
@@ -2713,8 +2721,14 @@ function isExactEpisodeMatch(torrentTitle, showTitleOrTitles, seasonNum, episode
         
         const singleMatch = singleEpisodePatterns.some(pattern => pattern.test(lightCleanedTitle));
         if (singleMatch) {
-            console.log(`✅ [ANIME] Single episode match for "${torrentTitle.substring(0, 80)}" Ep.${useAbsoluteEpisode} (absolute)`);
-            return true;
+            // ✅ Accept ONLY if no season in title OR season matches requested
+            if (torrentSeason === null || torrentSeason === seasonNum) {
+                console.log(`✅ [ANIME] Single episode match for "${torrentTitle.substring(0, 80)}" Ep.${useAbsoluteEpisode} (absolute)`);
+                return true;
+            } else {
+                console.log(`❌ [ANIME] Episode match but WRONG SEASON: torrent has S${torrentSeason}, need S${seasonNum}`);
+                return false;
+            }
         }
         
         // ✅ Check for episode range (e.g., "E144-195", "144-195", "E01-30", "S05E131-143")
@@ -2755,26 +2769,57 @@ function isExactEpisodeMatch(torrentTitle, showTitleOrTitles, seasonNum, episode
                 }
                 
                 // ✅ CRITICAL: Check BOTH absolute episode AND season/episode format!
+                // But ALSO verify the SEASON NUMBER matches!
                 // Because torrents are inconsistent:
-                // - One Piece: "S05E131-143" (absolute episodes 131-143)
-                // - Attack on Titan: "S03e01-22" (season episodes 1-22)
+                // - One Piece: "S05E131-143" (absolute episodes 131-143 in season 5)
+                // - Attack on Titan: "S03e01-22" (season 3 episodes 1-22)
                 
                 // 1. Check if ABSOLUTE episode is in range (for One Piece style)
                 const matchesAbsolute = useAbsoluteEpisode >= startEp && useAbsoluteEpisode <= endEp;
                 if (matchesAbsolute) {
-                    console.log(`✅ [ANIME RANGE] "${torrentTitle.substring(0, 80)}" range ${startEp}-${endEp} contains ABSOLUTE ep.${useAbsoluteEpisode}`);
-                    return true;
+                    // ✅ VERIFY SEASON: Accept only if no season OR season matches
+                    if (torrentSeason === null || torrentSeason === seasonNum) {
+                        console.log(`✅ [ANIME RANGE] "${torrentTitle.substring(0, 80)}" range ${startEp}-${endEp} contains ABSOLUTE ep.${useAbsoluteEpisode}`);
+                        return true;
+                    } else {
+                        console.log(`❌ [ANIME RANGE] Range match but WRONG SEASON: torrent S${torrentSeason}, need S${seasonNum}`);
+                        continue;
+                    }
                 }
                 
                 // 2. Check if SEASON episode is in range (for Attack on Titan style)
                 const matchesSeasonEp = episodeNum >= startEp && episodeNum <= endEp;
                 if (matchesSeasonEp) {
-                    console.log(`✅ [ANIME RANGE] "${torrentTitle.substring(0, 80)}" range ${startEp}-${endEp} contains SEASON ep.${episodeNum}`);
-                    return true;
+                    // ✅ VERIFY SEASON: Must have season indicator AND it must match
+                    if (torrentSeason === seasonNum) {
+                        console.log(`✅ [ANIME RANGE] "${torrentTitle.substring(0, 80)}" range ${startEp}-${endEp} contains SEASON ep.${episodeNum}`);
+                        return true;
+                    } else if (torrentSeason === null) {
+                        console.log(`❌ [ANIME RANGE] Range matches ep but NO SEASON indicator in title`);
+                        continue;
+                    } else {
+                        console.log(`❌ [ANIME RANGE] Range match but WRONG SEASON: torrent S${torrentSeason}, need S${seasonNum}`);
+                        continue;
+                    }
                 }
                 
                 console.log(`❌ [ANIME RANGE] Range ${startEp}-${endEp} does NOT contain ep.${episodeNum} (abs: ${useAbsoluteEpisode})`);
             }
+        }
+        
+        // ✅ Check for SEASON PACK (e.g., "S01", "Stagione 1", "Season 1 Complete")
+        // Accept if torrent contains the requested season
+        const seasonPackPatterns = [
+            new RegExp(`s${String(seasonNum).padStart(2, '0')}(?!\\d)`, 'i'),  // S01, S05
+            new RegExp(`season\\s*${seasonNum}(?!\\d)`, 'i'),                   // Season 1, Season 5
+            new RegExp(`stagione\\s*${String(seasonNum).padStart(2, '0')}`, 'i'), // Stagione 01
+            /\b(?:completa|complete)\b/i  // [COMPLETA] or Complete
+        ];
+        
+        const hasSeasonPack = seasonPackPatterns.some(pattern => pattern.test(lightCleanedTitle));
+        if (hasSeasonPack && (torrentSeason === seasonNum || torrentSeason === null)) {
+            console.log(`✅ [ANIME SEASON PACK] Match for "${torrentTitle.substring(0, 80)}" S${seasonNum}`);
+            return true;
         }
         
         console.log(`❌ [ANIME] Episode match for "${torrentTitle.substring(0, 80)}" Ep.${episodeNum}`);
