@@ -2393,6 +2393,57 @@ async function getTMDbFromMAL(malId) {
     }
 }
 
+// ✅ SOLUZIONE KITSU 4: Convert absolute episode to season/episode using TMDb
+async function convertAbsoluteEpisode(tmdbId, absoluteEpisode, tmdbKey) {
+    try {
+        console.log(`🔄 [Kitsu→Season] Converting absolute episode ${absoluteEpisode} for TMDb ${tmdbId}...`);
+        
+        const response = await fetch(
+            `https://api.themoviedb.org/3/tv/${tmdbId}?api_key=${tmdbKey}`,
+            { timeout: 5000 }
+        );
+        
+        if (!response.ok) {
+            console.warn(`⚠️ [Kitsu→Season] TMDb API error: ${response.status}`);
+            return null;
+        }
+        
+        const data = await response.json();
+        const seasons = data.seasons?.filter(s => s.season_number > 0) || []; // Skip specials (season 0)
+        
+        if (seasons.length === 0) {
+            console.warn(`⚠️ [Kitsu→Season] No seasons found for TMDb ${tmdbId}`);
+            return null;
+        }
+        
+        // Calculate cumulative episode count to find the right season
+        let cumulativeEpisodes = 0;
+        
+        for (const season of seasons) {
+            const seasonStart = cumulativeEpisodes + 1;
+            const seasonEnd = cumulativeEpisodes + season.episode_count;
+            
+            if (absoluteEpisode >= seasonStart && absoluteEpisode <= seasonEnd) {
+                const episodeInSeason = absoluteEpisode - cumulativeEpisodes;
+                console.log(`✅ [Kitsu→Season] Absolute ep. ${absoluteEpisode} = S${season.season_number}E${episodeInSeason}`);
+                return {
+                    season: season.season_number,
+                    episode: episodeInSeason
+                };
+            }
+            
+            cumulativeEpisodes += season.episode_count;
+        }
+        
+        console.warn(`⚠️ [Kitsu→Season] Absolute episode ${absoluteEpisode} exceeds total episodes (${cumulativeEpisodes})`);
+        return null;
+        
+    } catch (error) {
+        console.error(`❌ [Kitsu→Season] Error:`, error.message);
+        return null;
+    }
+}
+
 async function getKitsuDetails(kitsuId) {
     try {
         console.log(`🔄 [Kitsu] Fetching details for Kitsu ID: ${kitsuId}`);
@@ -3128,18 +3179,34 @@ async function handleStream(type, id, config, workerOrigin) {
                 return { streams: [] };
             } else {
                 // Series with episode number
-                // For Kitsu anime, we don't have season mapping - store as absolute episode
-                // We'll search for generic packs without season filtering
-                season = null;  // No season for Kitsu
-                episode = absoluteEpisode;
-                
                 console.log(`🌸 Looking up Kitsu details for: ${kitsuId}, absolute episode: ${absoluteEpisode}`);
                 mediaDetails = await getKitsuDetails(kitsuId);
                 
-                // Add absolute episode info to mediaDetails
                 if (mediaDetails) {
                     mediaDetails.absoluteEpisode = parseInt(absoluteEpisode);
                     mediaDetails.isAnime = true;  // Mark as anime for special handling
+                    
+                    // ✅ SOLUZIONE KITSU 5: Convert absolute episode to season/episode if we have TMDb ID
+                    if (mediaDetails.tmdbId) {
+                        console.log(`🔄 [Kitsu] Converting absolute episode ${absoluteEpisode} to season/episode using TMDb ${mediaDetails.tmdbId}...`);
+                        const converted = await convertAbsoluteEpisode(mediaDetails.tmdbId, parseInt(absoluteEpisode), tmdbKey);
+                        
+                        if (converted) {
+                            season = converted.season;
+                            episode = converted.episode;
+                            console.log(`✅ [Kitsu] Converted to S${String(season).padStart(2,'0')}E${String(episode).padStart(2,'0')}`);
+                        } else {
+                            // Fallback: treat as absolute episode without season mapping
+                            console.log(`⚠️ [Kitsu] Could not convert absolute episode, will search all packs`);
+                            season = null;
+                            episode = absoluteEpisode;
+                        }
+                    } else {
+                        // No TMDb ID, can't convert - fallback to generic pack search
+                        console.log(`⚠️ [Kitsu] No TMDb ID available, will search all packs`);
+                        season = null;
+                        episode = absoluteEpisode;
+                    }
                 }
             }
         } else {
@@ -3303,12 +3370,12 @@ async function handleStream(type, id, config, workerOrigin) {
         let dbResults = [];
         if (dbEnabled && mediaDetails.imdbId) {
             if (type === 'series') {
-                // For anime (Kitsu), we don't have season mapping - skip episode search, get all packs
-                if (mediaDetails.isAnime || season === null) {
-                    console.log(`🎌 [Anime] Skipping episode search for anime, fetching all packs`);
-                    dbResults = await dbHelper.searchByImdbId(mediaDetails.imdbId, type);
-                } else {
-                    // Search for specific episode (normal series)
+                // ✅ SOLUZIONE KITSU 6: Use converted season/episode if available (from absolute episode)
+                if (season !== null && episode !== null) {
+                    // We have season/episode (either from original request or Kitsu conversion)
+                    console.log(`💾 [DB] Searching for S${String(season).padStart(2,'0')}E${String(episode).padStart(2,'0')} with IMDb ${mediaDetails.imdbId}`);
+                    
+                    // Search for specific episode files (with file_index)
                     dbResults = await dbHelper.searchEpisodeFiles(
                         mediaDetails.imdbId, 
                         parseInt(season), 
@@ -3321,6 +3388,10 @@ async function handleStream(type, id, config, workerOrigin) {
                     
                     // Merge: episode files + packs
                     dbResults = [...dbResults, ...packResults];
+                } else {
+                    // No season/episode available (Kitsu without TMDb conversion fallback)
+                    console.log(`🎌 [Anime] No season mapping available, fetching all packs`);
+                    dbResults = await dbHelper.searchByImdbId(mediaDetails.imdbId, type);
                 }
             } else {
                 // Search for movie - both singles AND packs
