@@ -3911,12 +3911,20 @@ async function handleStream(type, id, config, workerOrigin) {
             const useCorsaroNero = config.use_corsaronero !== false; // Default true
             const useKnaben = config.use_knaben !== false; // Default true
             
+            // 🔥 FILTER: Skip UIndex/Knaben for Corsaro-specific queries (Stagione, Complete, etc.)
+            // This prevents 429 errors on UIndex by reducing the number of redundant queries
+            const isCorsaroSpecific = query.match(/\b(stagione|completa|complete)\b/i);
+            
             if (useUIndex) {
-                console.log('📊 UIndex enabled for search');
-                searchPromises.push({
-                    name: 'UIndex',
-                    promise: fetchUIndexData(query, searchType, italianTitle)
-                });
+                if (!isCorsaroSpecific) {
+                    console.log('📊 UIndex enabled for search');
+                    searchPromises.push({
+                        name: 'UIndex',
+                        promise: fetchUIndexData(query, searchType, italianTitle)
+                    });
+                } else {
+                    console.log('⏭️  Skipping UIndex for Corsaro-specific query');
+                }
             } else {
                 console.log('⏭️  UIndex disabled by user');
             }
@@ -3932,11 +3940,15 @@ async function handleStream(type, id, config, workerOrigin) {
             }
             
             if (useKnaben) {
-                console.log('🦉 Knaben enabled for search');
-                searchPromises.push({
-                    name: 'Knaben',
-                    promise: fetchKnabenData(query, searchType)
-                });
+                if (!isCorsaroSpecific) {
+                    console.log('🦉 Knaben enabled for search');
+                    searchPromises.push({
+                        name: 'Knaben',
+                        promise: fetchKnabenData(query, searchType)
+                    });
+                } else {
+                    console.log('⏭️  Skipping Knaben for Corsaro-specific query');
+                }
             } else {
                 console.log('⏭️  Knaben disabled by user');
             }
