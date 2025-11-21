@@ -174,9 +174,12 @@ function getLanguageInfo(title, italianMovieTitle = null) {
 
     const lowerTitle = title.toLowerCase();
 
-    // Check for multi-language first
-    if (/\b(multi|dual)\b/i.test(lowerTitle)) {
-        return { icon: '🌈 ', isItalian: false, isMulti: true }; // Rainbow icon for multi-language
+    // Check for explicit multi-language keywords OR presence of both "ita" and "eng"
+    const hasIta = /\b(ita|italian)\b/i.test(lowerTitle);
+    const hasEng = /\b(eng|english)\b/i.test(lowerTitle);
+
+    if (/\b(multi|dual)\b/i.test(lowerTitle) || (hasIta && hasEng)) {
+        return { icon: '🌈 ', isItalian: true, isMulti: true }; // Rainbow icon for multi-language
     }
 
     const isIta = isItalian(title, italianMovieTitle);
