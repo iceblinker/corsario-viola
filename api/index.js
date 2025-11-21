@@ -4311,13 +4311,13 @@ async function handleStream(type, id, config, workerOrigin) {
             cacheChecks.push(
                 (async () => {
                     // ⚠️ instantAvailability is DISABLED by RealDebrid (error_code 37)
-                    // Strategy: Use DB cache (10-day TTL) + mark as cached on successful unrestrict
+                    // Strategy: Use DB cache (20-day TTL) + mark as cached on successful unrestrict
                     
-                    // STEP 1: Check DB cache for known cached torrents (< 10 days)
+                    // STEP 1: Check DB cache for known cached torrents (< 20 days)
                     let dbCachedResults = {};
                     if (dbEnabled) {
                         dbCachedResults = await dbHelper.getRdCachedAvailability(hashes);
-                        console.log(`💾 [DB Cache] ${Object.keys(dbCachedResults).length}/${hashes.length} hashes found in cache (< 10 days)`);
+                        console.log(`💾 [DB Cache] ${Object.keys(dbCachedResults).length}/${hashes.length} hashes found in cache (< 20 days)`);
                     }
                     
                     // STEP 2: Set DB cached results
