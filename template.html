@@ -552,9 +552,9 @@
                     <img src="/logo.png" alt="Logo" class="logo">
                     <div class="brand" style="text-align: center;">
                         <h1 style="margin-bottom: 5px;">IlCorsaroViola</h1>
-                        <small style="font-size: 20px; color: #9ca3af; display: block; line-height: 1.5;">
-                            Addon creato partendo da <a href="https://stremizio.vercel.app/" target="_blank" style="color: #9333ea; text-decoration: none;">Stremizio</a>, grazie a 
-                            <a href="https://github.com/StremioItalia/stremizio" target="_blank" style="color: #9333ea; text-decoration: none;">Steve Celticus</a>
+                        <small style="font-size: 12px; color: #9ca3af; display: block; line-height: 1.5;">
+                            Addon creato partendo da <a href="https://stremizio.vercel.app/" target="_blank" style="color: #9333ea; text-decoration: none;">Stremizio 2.0</a>, grazie a 
+                            <a href="https://github.com/StremioItalia/stremizio" target="_blank" style="color: #9333ea; text-decoration: none;">Steve</a>
                         </small>
                     </div>
                 </div>
@@ -668,6 +668,31 @@
                         <span>🦉 Knaben (Internazionale)</span>
                     </label>
                 </div>
+                
+                <div style="margin-top: 15px; border-top: 1px solid rgba(147, 51, 234, 0.2); padding-top: 15px;">
+                    <label for="max_res_limit" style="display: flex; justify-content: space-between; align-items: center; background: transparent; border: none; padding: 0; cursor: default;">
+                        <span style="font-size: 0.9em; color: #d1d5db;">Max Resolution Result (limita i risultati per ogni risoluzione)</span>
+                        <select id="max_res_limit" style="width: 60px; background: rgba(10, 10, 26, 0.6); color: white; border: 1px solid rgba(147, 51, 234, 0.3); border-radius: 4px; padding: 4px; cursor: pointer;">
+                            <option value="">No</option>
+                            <option value="1">1</option>
+                            <option value="2">2</option>
+                            <option value="3">3</option>
+                            <option value="4">4</option>
+                            <option value="5">5</option>
+                            <option value="6">6</option>
+                            <option value="7">7</option>
+                            <option value="9">8</option>
+                            <option value="9">9</option>
+                            <option value="10">10</option>
+                            <option value="11">11</option>
+                            <option value="12">12</option>
+                            <option value="13">13</option>
+                            <option value="14">14</option>
+                            <option value="15">15</option>
+                            <option value="20">20</option>
+                        </select>
+                    </label>
+                </div>
             </div>
             
             <div class="action-section full-width">
@@ -701,6 +726,7 @@
         const useCorsaroNeroCheckbox = document.getElementById("use_corsaronero");
         const useUIndexCheckbox = document.getElementById("use_uindex");
         const useKnabenCheckbox = document.getElementById("use_knaben");
+        const maxResLimitSelect = document.getElementById("max_res_limit");
         
         // Buttons
         const installButton = document.getElementById("install_button");
@@ -789,6 +815,12 @@
             config.use_corsaronero = useCorsaroNeroCheckbox.checked;
             config.use_uindex = useUIndexCheckbox.checked;
             config.use_knaben = useKnabenCheckbox.checked;
+            
+            // Max Resolution Limit
+            const maxResLimit = maxResLimitSelect.value;
+            if (maxResLimit) {
+                config.max_res_limit = parseInt(maxResLimit);
+            }
             
             // Check if at least one search site is selected
             let searchSites = [];
@@ -942,6 +974,15 @@
                     }
                 }
                 
+                // Max Resolution Limit
+                if (cfg.max_res_limit) {
+                    const maxResLimitSelect = document.getElementById('max_res_limit');
+                    if (maxResLimitSelect) {
+                        maxResLimitSelect.value = cfg.max_res_limit;
+                        console.log('✅ Loaded max_res_limit:', cfg.max_res_limit);
+                    }
+                }
+                
                 console.log('✅ Configuration preloaded successfully');
                 
                 // Trigger updateInstallLink to refresh the UI
@@ -965,6 +1006,7 @@
         useCorsaroNeroCheckbox.addEventListener('change', updateInstallLink);
         useUIndexCheckbox.addEventListener('change', updateInstallLink);
         useKnabenCheckbox.addEventListener('change', updateInstallLink);
+        maxResLimitSelect.addEventListener('change', updateInstallLink);
         
         // Initial call to enable buttons
         updateInstallLink();
@@ -1064,5 +1106,3 @@
     </script>
 </body>
 </html>
-
-
