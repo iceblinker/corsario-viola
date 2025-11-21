@@ -3934,7 +3934,9 @@ async function handleStream(type, id, config, workerOrigin) {
             
             // 🔥 FILTER: Skip UIndex/Knaben for Corsaro-specific queries (Stagione, Complete, etc.)
             // This prevents 429 errors on UIndex by reducing the number of redundant queries
-            const isCorsaroSpecific = query.match(/\b(stagione|completa|complete)\b/i);
+            // MODIFIED: Only skip if query contains "Stagione" AND "Completa" to be less aggressive
+            // Or if it's a purely Italian query structure that UIndex/Knaben (international) won't understand well
+            const isCorsaroSpecific = query.match(/\b(stagione\s+\d+|serie\s+completa)\b/i);
             
             if (useUIndex) {
                 if (!isCorsaroSpecific) {
@@ -3961,6 +3963,7 @@ async function handleStream(type, id, config, workerOrigin) {
             }
             
             if (useKnaben) {
+                // Knaben is good for international content, so we only skip if it's VERY specific Italian
                 if (!isCorsaroSpecific) {
                     console.log('🦉 Knaben enabled for search');
                     searchPromises.push({
