@@ -1,4 +1,4 @@
-# 🇮🇹 IlCorsaroViola - The Ultimate Italian Torrent search
+# 🇮🇹 IlCorsaroViola - The Ultimate Italian Stremio Addon
 
 <div align="center">
 
@@ -13,14 +13,14 @@
 
 ---
 
-## 🚀 Che cos'è StreamVix?
+## 🚀 Che cos'è IlCorsaroViola?
 
-StreamVix è un addon per Stremio progettato specificamente per l'utenza italiana. Non è solo un semplice scraper: è un **ecosistema intelligente** che impara e migliora con l'uso.
+IlCorsaroViola è un addon per Stremio progettato specificamente per l'utenza italiana. Non è solo un semplice scraper: è un **ecosistema intelligente** che impara e migliora con l'uso.
 
 ### 🧠 Database Dinamico & Self-Filling
-La caratteristica più potente di StreamVix è il suo database "vivo".
+La caratteristica più potente di IlCorsaroViola è il suo database "vivo".
 *   **Non serve un database pre-popolato:** Il sistema parte leggero.
-*   **Popolamento automatico:** Ogni volta che un utente cerca un film o una serie TV, StreamVix scansiona decine di fonti.
+*   **Popolamento automatico:** Ogni volta che un utente cerca un film o una serie TV, IlCorsaroViola scansiona decine di fonti.
 *   **Salvataggio intelligente:** I risultati trovati vengono salvati nel database centrale.
 *   **Cache condivisa:** La prossima volta che *qualsiasi* utente cercherà lo stesso titolo, il risultato sarà **istantaneo** (Tier 1).
 
@@ -49,43 +49,14 @@ I risultati vengono presentati nell'ordine perfetto per l'utente:
 
 ---
 
-## 🛠️ Installazione & Deploy
+## 📊 Consultazione Database
 
-### Requisiti
-*   Node.js 18+
-*   PostgreSQL Database
-*   Account Real-Debrid / AllDebrid (opzionale ma consigliato)
+È possibile consultare lo stato del database e i contenuti indicizzati tramite il pannello di controllo pubblico:
 
-### Variabili d'Ambiente (.env)
-Crea un file `.env` nella root del progetto:
+*   **URL:** [https://db.corsaroviola.dpdns.org/](https://db.corsaroviola.dpdns.org/)
+*   **Password:** `Aargh!`
 
-```env
-# Server Configuration
-PORT=3000
-HOST=0.0.0.0
-
-# Database
-DATABASE_URL=postgresql://user:password@host:port/dbname
-
-# Security
-API_KEY=tua_chiave_segreta_per_api
-
-# External Services (Opzionali)
-TMDB_KEY=tua_chiave_tmdb
-FANART_KEY=tua_chiave_fanart
-```
-
-### Avvio
-```bash
-# Installazione dipendenze
-npm install
-
-# Avvio in sviluppo
-npm run dev
-
-# Avvio in produzione
-npm start
-```
+Qui potrete vedere in tempo reale quali titoli sono stati aggiunti e lo stato della cache.
 
 ---
 
