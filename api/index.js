@@ -3894,11 +3894,22 @@ async function handleStream(type, id, config, workerOrigin) {
         // --- FINE MODIFICA ---
 
         // --- NUOVA LOGICA DI AGGREGAZIONE E DEDUPLICAZIONE ---
-        const allRawResults = [];
+        // Separazione dei risultati per provider per applicare filtri specifici
+        const rawResultsByProvider = {
+            UIndex: [],
+            Knaben: [],
+            CorsaroNero: [],
+            Jackettio: []
+        };
         
         const searchType = kitsuId ? 'anime' : type;
-        const TOTAL_RESULTS_TARGET = 50; // Stop searching when we have enough results to avoid excessive subrequests.
+        const TOTAL_RESULTS_TARGET = 50; 
         let totalQueries = 0;
+        
+        // Check which sites are enabled (default to all if not specified)
+        const useUIndex = config.use_uindex !== false; 
+        const useCorsaroNero = config.use_corsaronero !== false; 
+        const useKnaben = config.use_knaben !== false; 
         
         // ✅ LIVE SEARCH (Tier 3 + Parallel Flows)
         console.log(`🔍 Starting live search...`);
@@ -3909,73 +3920,74 @@ async function handleStream(type, id, config, workerOrigin) {
             jackettioInstance = new Jackettio(
                 config.jackett_url, 
                 config.jackett_api_key,
-                config.jackett_password // Optional password
+                config.jackett_password 
             );
             console.log('🔍 [Jackettio] Instance initialized (ITALIAN ONLY mode)');
         }
 
+        // 1️⃣ UINDEX: Logica Specifica (Query Ridotte: Inglese+ita, Italiano)
+        if (useUIndex) {
+            const uindexQueries = [];
+            // Query 1: Titolo Inglese + "ita"
+            uindexQueries.push(`${mediaDetails.title} ita`);
+            // Query 2: Titolo Italiano (se esiste)
+            if (italianTitle) uindexQueries.push(italianTitle);
+            
+            const uniqueUindexQueries = [...new Set(uindexQueries)];
+            console.log(`📊 [UIndex] Running optimized queries:`, uniqueUindexQueries);
+            
+            for (const q of uniqueUindexQueries) {
+                try {
+                    const res = await fetchUIndexData(q, searchType, italianTitle);
+                    if (res && res.length > 0) {
+                        console.log(`📊 [UIndex] Found ${res.length} results for "${q}"`);
+                        rawResultsByProvider.UIndex.push(...res);
+                    }
+                } catch (e) {
+                    console.error(`❌ [UIndex] Error searching "${q}":`, e.message);
+                }
+                await new Promise(resolve => setTimeout(resolve, 250)); // Rate limit protection
+            }
+        }
+
+        // 2️⃣ MAIN LOOP: CorsaroNero, Knaben, Jackettio (Query Complete)
         for (const query of finalSearchQueries) {
             console.log(`\n🔍 Searching sources for: "${query}"`);
 
-            // Stop searching if we have a good number of results to process.
-            if (allRawResults.length >= TOTAL_RESULTS_TARGET * 4) { 
+            // Stop searching if we have a good number of results (checking total accumulated)
+            const currentTotal = Object.values(rawResultsByProvider).reduce((acc, arr) => acc + arr.length, 0);
+            if (currentTotal >= TOTAL_RESULTS_TARGET * 4) { 
                 console.log(`🎯 Target of ~${TOTAL_RESULTS_TARGET} unique results likely reached. Stopping further searches.`);
                 break;
             }
 
-            // Build search promises based on user selection
             const searchPromises = [];
             
-            // Check which sites are enabled (default to all if not specified)
-            const useUIndex = config.use_uindex !== false; // Default true
-            const useCorsaroNero = config.use_corsaronero !== false; // Default true
-            const useKnaben = config.use_knaben !== false; // Default true
-            
-            // 🔥 FILTER: Skip UIndex/Knaben for Corsaro-specific queries
+            // 🔥 FILTER: Skip Knaben for Corsaro-specific queries (Stagione/Completa)
             const isCorsaroSpecific = query.match(/\b(stagione\s+\d+|serie\s+completa)\b/i);
             
-            // 1. UIndex (Always run if enabled)
-            if (useUIndex) {
-                if (!isCorsaroSpecific) {
-                    console.log('📊 UIndex enabled for search');
-                    searchPromises.push({
-                        name: 'UIndex',
-                        promise: fetchUIndexData(query, searchType, italianTitle)
-                    });
-                } else {
-                    console.log('⏭️  Skipping UIndex for Corsaro-specific query');
-                }
-            }
-            
-            // 2. CorsaroNero (Run ONLY if NOT skipped by DB/FTS)
+            // CorsaroNero
             if (useCorsaroNero) {
                 if (!skipLiveSearch) {
-                    console.log('🏴‍☠️ CorsaroNero enabled for search');
                     searchPromises.push({
                         name: 'CorsaroNero',
                         promise: fetchCorsaroNeroData(query, searchType)
                     });
-                } else {
-                    console.log('⏭️  Skipping CorsaroNero (results found in DB/FTS)');
                 }
             }
             
-            // 3. Knaben (Always run if enabled)
+            // Knaben (Always run if enabled, but skip Italian-specific keywords if needed)
             if (useKnaben) {
                 if (!isCorsaroSpecific) {
-                    console.log('🦉 Knaben enabled for search');
                     searchPromises.push({
                         name: 'Knaben',
                         promise: fetchKnabenData(query, searchType)
                     });
-                } else {
-                    console.log('⏭️  Skipping Knaben for Corsaro-specific query');
                 }
             }
 
-            // 4. Jackettio (Always run if configured)
+            // Jackettio
             if (jackettioInstance) {
-                console.log('🔍 Jackettio enabled for search');
                 searchPromises.push({
                     name: 'Jackettio',
                     promise: fetchJackettioData(query, searchType, jackettioInstance)
@@ -3983,18 +3995,18 @@ async function handleStream(type, id, config, workerOrigin) {
             }
             
             if (searchPromises.length === 0) {
-                console.log('⚠️  No search sites enabled or all skipped! Skipping query.');
-                continue; // Skip to next query
+                continue;
             }
 
             const results = await Promise.allSettled(searchPromises.map(sp => sp.promise));
 
-            // Process results dynamically
             results.forEach((result, index) => {
                 const sourceName = searchPromises[index].name;
                 if (result.status === 'fulfilled' && result.value) {
                     console.log(`✅ ${sourceName} returned ${result.value.length} results for query.`);
-                    allRawResults.push(...result.value);
+                    if (rawResultsByProvider[sourceName]) {
+                        rawResultsByProvider[sourceName].push(...result.value);
+                    }
                 } else if (result.status === 'rejected') {
                     console.error(`❌ ${sourceName} search failed:`, result.reason);
                 }
@@ -4005,6 +4017,44 @@ async function handleStream(type, id, config, workerOrigin) {
                 await new Promise(resolve => setTimeout(resolve, 250));
             }
         }
+
+        // 3️⃣ POST-PROCESSING: Filtro "Lista A / Lista B" (Italiano vs Altri)
+        
+        // Helper per rilevare italiano
+        const isItalianResult = (r) => {
+            const title = (r.title || '').toLowerCase();
+            return title.includes('ita') || title.includes('italian') || (r.audio && r.audio.includes('it'));
+        };
+
+        // Filtro Knaben
+        if (rawResultsByProvider.Knaben.length > 0) {
+            const knabenIta = rawResultsByProvider.Knaben.filter(isItalianResult);
+            if (knabenIta.length > 0) {
+                console.log(`🦉 [Knaben] Found ${knabenIta.length} Italian results. Hiding ${rawResultsByProvider.Knaben.length - knabenIta.length} non-Italian results.`);
+                rawResultsByProvider.Knaben = knabenIta;
+            } else {
+                console.log(`🦉 [Knaben] No Italian results found. Keeping all ${rawResultsByProvider.Knaben.length} international results.`);
+            }
+        }
+
+        // Filtro UIndex
+        if (rawResultsByProvider.UIndex.length > 0) {
+            const uindexIta = rawResultsByProvider.UIndex.filter(isItalianResult);
+            if (uindexIta.length > 0) {
+                console.log(`📊 [UIndex] Found ${uindexIta.length} Italian results. Hiding ${rawResultsByProvider.UIndex.length - uindexIta.length} non-Italian results.`);
+                rawResultsByProvider.UIndex = uindexIta;
+            } else {
+                console.log(`📊 [UIndex] No Italian results found. Keeping all ${rawResultsByProvider.UIndex.length} international results.`);
+            }
+        }
+
+        // Merge finale
+        const allRawResults = [
+            ...rawResultsByProvider.CorsaroNero,
+            ...rawResultsByProvider.Jackettio,
+            ...rawResultsByProvider.Knaben,
+            ...rawResultsByProvider.UIndex
+        ];
 
         console.log(`🔎 Found a total of ${allRawResults.length} raw results from all sources. Performing smart deduplication...`);
 
