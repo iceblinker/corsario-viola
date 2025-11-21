@@ -1,4 +1,4 @@
-# 🇮🇹 StreamVix - The Ultimate Italian Stremio Addon
+# 🇮🇹 IlCorsaroViola - The Ultimate Italian Torrent search
 
 <div align="center">
 
