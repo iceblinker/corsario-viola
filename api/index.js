@@ -4081,41 +4081,10 @@ async function handleStream(type, id, config, workerOrigin) {
             }
         }
 
-        // 3️⃣ POST-PROCESSING: Filtro "Lista A / Lista B" (Italiano vs Altri)
-        
-        // Helper per rilevare italiano
-        const isItalianResult = (r) => {
-            const title = (r.title || '').toLowerCase();
-            return title.includes('ita') || title.includes('italian') || (r.audio && r.audio.includes('it'));
-        };
-
-        // Filtro Knaben
-        if (rawResultsByProvider.Knaben.length > 0) {
-            const knabenIta = rawResultsByProvider.Knaben.filter(isItalianResult);
-            if (knabenIta.length > 0) {
-                console.log(`🦉 [Knaben] Found ${knabenIta.length} Italian results. Hiding ${rawResultsByProvider.Knaben.length - knabenIta.length} non-Italian results.`);
-                rawResultsByProvider.Knaben = knabenIta;
-            } else {
-                console.log(`🦉 [Knaben] No Italian results found. Keeping all ${rawResultsByProvider.Knaben.length} international results.`);
-                // ✅ LIMIT FALLBACK: Keep only top 3 results to avoid flooding
-                rawResultsByProvider.Knaben = sortByQualityAndSeeders(rawResultsByProvider.Knaben).slice(0, 3);
-                console.log(`🦉 [Knaben] Limited fallback to top 3 results.`);
-            }
-        }
-
-        // Filtro UIndex
-        if (rawResultsByProvider.UIndex.length > 0) {
-            const uindexIta = rawResultsByProvider.UIndex.filter(isItalianResult);
-            if (uindexIta.length > 0) {
-                console.log(`📊 [UIndex] Found ${uindexIta.length} Italian results. Hiding ${rawResultsByProvider.UIndex.length - uindexIta.length} non-Italian results.`);
-                rawResultsByProvider.UIndex = uindexIta;
-            } else {
-                console.log(`📊 [UIndex] No Italian results found. Keeping all ${rawResultsByProvider.UIndex.length} international results.`);
-                // ✅ LIMIT FALLBACK: Keep only top 3 results to avoid flooding
-                rawResultsByProvider.UIndex = sortByQualityAndSeeders(rawResultsByProvider.UIndex).slice(0, 3);
-                console.log(`📊 [UIndex] Limited fallback to top 3 results.`);
-            }
-        }
+        // 3️⃣ POST-PROCESSING: MOVED AFTER SEASON FILTERING
+        // We no longer filter by language here to avoid discarding correct English seasons 
+        // when only incorrect Italian seasons are found.
+        // See "LANGUAGE FILTERING (Post-Season Filter)" below.
 
         // Merge finale
         const allRawResults = [
@@ -4356,13 +4325,9 @@ async function handleStream(type, id, config, workerOrigin) {
             
             console.log(`📺 Episode filtering: ${filteredResults.length} of ${originalCount} results match`);
             
-            // ⚠️ FALLBACK: For NON-anime series, if exact matching fails, be more lenient
-            // For anime, NEVER use fallback - if no episode matches, return nothing!
-            if (filteredResults.length === 0 && originalCount > 0 && !kitsuId) {
-                console.log('⚠️ Exact filtering removed all results, using broader match (NON-ANIME only)');
-                filteredResults = results.slice(0, Math.min(10, results.length));
-            } else if (filteredResults.length === 0 && kitsuId) {
-                console.log(`❌ [ANIME] No packs found containing episode ${episode}. Returning empty results.`);
+            // ⚠️ FALLBACK REMOVED: Strict season matching enforced.
+            if (filteredResults.length === 0 && originalCount > 0) {
+                console.log('❌ Exact filtering removed all results. Strict season matching enforced: returning 0 results.');
             }
         } else if (type === 'movie') {
             const originalCount = filteredResults.length;
@@ -4414,6 +4379,32 @@ async function handleStream(type, id, config, workerOrigin) {
             if (filteredResults.length === 0 && originalCount > 0) {
                 console.log('⚠️ Exact filtering removed all results, using broader match');
                 filteredResults = results.slice(0, Math.min(15, results.length));
+            }
+        }
+
+        // ✅ LANGUAGE FILTERING (Post-Season Filter)
+        // Apply "Italian Preference" ONLY after we have filtered for the correct season/episode.
+        // This ensures we don't discard English S02 just because we found Italian S01.
+        if (filteredResults.length > 0) {
+            const hasItalianResults = filteredResults.some(r => {
+                const lang = getLanguageInfo(r.title, italianTitle);
+                return lang.isItalian || lang.isMulti;
+            });
+
+            if (hasItalianResults) {
+                const originalCount = filteredResults.length;
+                const italianOnly = filteredResults.filter(r => {
+                    const lang = getLanguageInfo(r.title, italianTitle);
+                    return lang.isItalian || lang.isMulti;
+                });
+                
+                // Only apply if we actually filter something out
+                if (italianOnly.length < originalCount) {
+                    console.log(`🇮🇹 [Lang Filter] Found ${italianOnly.length} Italian results for correct season. Hiding ${originalCount - italianOnly.length} non-Italian results.`);
+                    filteredResults = italianOnly;
+                }
+            } else {
+                console.log(`🌍 [Lang Filter] No Italian results for correct season. Keeping all ${filteredResults.length} international results.`);
             }
         }
         
