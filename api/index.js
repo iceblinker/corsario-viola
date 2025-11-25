@@ -169,8 +169,20 @@ function isItalian(title, italianMovieTitle = null) {
 }
 
 // ✅ NUOVA FUNZIONE: Icona lingua
-function getLanguageInfo(title, italianMovieTitle = null) {
+function getLanguageInfo(title, italianMovieTitle = null, source = null) {
     if (!title) return { icon: '', isItalian: false };
+
+    // ✅ FORCE ITALIAN FOR CORSARONERO
+    if (source && (source === 'CorsaroNero' || source.includes('CorsaroNero'))) {
+        const lowerTitle = title.toLowerCase();
+        const hasIta = /\b(ita|italian)\b/i.test(lowerTitle);
+        const hasEng = /\b(eng|english)\b/i.test(lowerTitle);
+        
+        if (/\b(multi|dual)\b/i.test(lowerTitle) || (hasIta && hasEng)) {
+            return { icon: '🌈 ', isItalian: true, isMulti: true };
+        }
+        return { icon: '🇮🇹 ', isItalian: true, isMulti: false };
+    }
 
     const lowerTitle = title.toLowerCase();
 
@@ -1093,8 +1105,8 @@ function processAndSortResults(results, italianTitle = null) {
     // Sort by Italian, then quality, then by size, then by seeders
     validResults.sort((a, b) => {
         // ✅ MODIFICA: Usa la nuova logica unificata
-        const aLang = getLanguageInfo(a.title, italianTitle);
-        const bLang = getLanguageInfo(b.title, italianTitle);
+        const aLang = getLanguageInfo(a.title, italianTitle, a.source);
+        const bLang = getLanguageInfo(b.title, italianTitle, b.source);
 
         if (aLang.isItalian !== bLang.isItalian) return aLang.isItalian ? -1 : 1;
         if (aLang.isMulti !== bLang.isMulti) return aLang.isMulti ? -1 : 1;
@@ -1222,7 +1234,7 @@ function limitResultsByLanguageAndQuality(results, italianLimit = 5, otherLimit 
     // Separa i risultati italiani dagli altri
     for (const result of results) {
         // Usiamo la funzione getLanguageInfo per coerenza con il resto dell'app
-        const { isItalian, isMulti } = getLanguageInfo(result.title, null); // italianMovieTitle non è disponibile qui
+        const { isItalian, isMulti } = getLanguageInfo(result.title, null, result.source); // italianMovieTitle non è disponibile qui
         if (isItalian || isMulti) { // Tratta sia ITA che MULTI come prioritari
             italianResults.push(result);
         } else {
@@ -4225,7 +4237,7 @@ async function handleStream(type, id, config, workerOrigin) {
         for (const result of allRawResults) {
             if (!result.infoHash) continue;
             const hash = result.infoHash;
-            const newLangInfo = getLanguageInfo(result.title, italianTitle);
+            const newLangInfo = getLanguageInfo(result.title, italianTitle, result.source);
 
             if (!bestResults.has(hash)) {
                 bestResults.set(hash, result);
@@ -4235,7 +4247,7 @@ async function handleStream(type, id, config, workerOrigin) {
                 console.log(`🔍 [Dedup] DUPLICATE hash: ${hash.substring(0, 8)}... comparing "${existing.title.substring(0, 50)}..." vs "${result.title.substring(0, 50)}..."`);
                 console.log(`   Existing: size=${existing.size}, seeders=${existing.seeders}, fileIndex=${existing.fileIndex}`);
                 console.log(`   New: size=${result.size}, seeders=${result.seeders}, fileIndex=${result.fileIndex}`);
-                const existingLangInfo = getLanguageInfo(existing.title, italianTitle);
+                const existingLangInfo = getLanguageInfo(existing.title, italianTitle, existing.source);
 
                 let isNewBetter = false;
                 // An Italian version is always better than a non-Italian one.
@@ -4391,14 +4403,14 @@ async function handleStream(type, id, config, workerOrigin) {
         // This ensures we don't discard English S02 just because we found Italian S01.
         if (filteredResults.length > 0) {
             const hasItalianResults = filteredResults.some(r => {
-                const lang = getLanguageInfo(r.title, italianTitle);
+                const lang = getLanguageInfo(r.title, italianTitle, r.source);
                 return lang.isItalian || lang.isMulti;
             });
 
             if (hasItalianResults) {
                 const originalCount = filteredResults.length;
                 const italianOnly = filteredResults.filter(r => {
-                    const lang = getLanguageInfo(r.title, italianTitle);
+                    const lang = getLanguageInfo(r.title, italianTitle, r.source);
                     return lang.isItalian || lang.isMulti;
                 });
                 
