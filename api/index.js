@@ -170,32 +170,37 @@ function isItalian(title, italianMovieTitle = null) {
 
 // ✅ NUOVA FUNZIONE: Icona lingua
 function getLanguageInfo(title, italianMovieTitle = null, source = null) {
-    if (!title) return { icon: '', isItalian: false };
-
-    // ✅ FORCE ITALIAN FOR CORSARONERO
-    if (source && (source === 'CorsaroNero' || source.includes('CorsaroNero'))) {
-        const lowerTitle = title.toLowerCase();
-        const hasIta = /\b(ita|italian)\b/i.test(lowerTitle);
-        const hasEng = /\b(eng|english)\b/i.test(lowerTitle);
-        
-        if (/\b(multi|dual)\b/i.test(lowerTitle) || (hasIta && hasEng)) {
-            return { icon: '🌈 ', isItalian: true, isMulti: true };
-        }
-        return { icon: '🇮🇹 ', isItalian: true, isMulti: false };
-    }
+    if (!title) return { icon: '', isItalian: false, isMulti: false, displayLabel: '' };
 
     const lowerTitle = title.toLowerCase();
-
-    // Check for explicit multi-language keywords OR presence of both "ita" and "eng"
-    const hasIta = /\b(ita|italian)\b/i.test(lowerTitle);
+    
+    // Detect flags
+    let hasIta = /\b(ita|italian|subita)\b/i.test(lowerTitle) || isItalian(title, italianMovieTitle);
     const hasEng = /\b(eng|english)\b/i.test(lowerTitle);
+    const hasMulti = /\b(multi|dual)\b/i.test(lowerTitle);
 
-    if (/\b(multi|dual)\b/i.test(lowerTitle) || (hasIta && hasEng)) {
-        return { icon: '🌈 ', isItalian: true, isMulti: true }; // Rainbow icon for multi-language
+    // Force Italian for CorsaroNero
+    if (source && (source === 'CorsaroNero' || source.includes('CorsaroNero'))) {
+        hasIta = true;
     }
 
-    const isIta = isItalian(title, italianMovieTitle);
-    return { icon: isIta ? '🇮🇹 ' : '', isItalian: isIta, isMulti: false };
+    // Logic 1: ITA + ENG -> 🇮🇹 🇬🇧
+    if (hasIta && hasEng) {
+        return { icon: '🇮🇹 🇬🇧', isItalian: true, isMulti: true, displayLabel: '🇮🇹 🇬🇧' };
+    }
+
+    // Logic 2: SOLO ITA (or ITA + MULTI) -> 🇮🇹
+    if (hasIta) {
+        return { icon: '🇮🇹', isItalian: true, isMulti: false, displayLabel: '🇮🇹' };
+    }
+
+    // Logic 3: SOLO MULTI (No ITA) -> 🌈 MULTI
+    if (hasMulti) {
+        return { icon: '🌈', isItalian: false, isMulti: true, displayLabel: '🌈 MULTI' };
+    }
+
+    // Logic 4: SOLO ENG (Default) -> 🇬🇧
+    return { icon: '🇬🇧', isItalian: false, isMulti: false, displayLabel: '🇬🇧' };
 }
 
 // ✅ NUOVA FUNZIONE: Detecta Season Pack
@@ -4728,7 +4733,7 @@ async function handleStream(type, id, config, workerOrigin) {
                     
                     // Languages
                     const langInfo = getLanguageInfo(result.title, italianTitle, result.source);
-                    const langDisplay = langInfo.isMulti ? '🌈 MULTI' : (langInfo.isItalian ? '🇮🇹' : '🇬🇧');
+                    const langDisplay = langInfo.displayLabel;
                     const languageLine = `🗣️ ${langDisplay}`;
 
                     // Normalize provider name
@@ -4828,7 +4833,7 @@ async function handleStream(type, id, config, workerOrigin) {
                     const sizeLine = `💾 ${result.size || 'Unknown'}`;
                     
                     const langInfo = getLanguageInfo(result.title, italianTitle, result.source);
-                    const langDisplay = langInfo.isMulti ? '🌈 MULTI' : (langInfo.isItalian ? '🇮🇹' : '🇬🇧');
+                    const langDisplay = langInfo.displayLabel;
                     const languageLine = `🗣️ ${langDisplay}`;
 
                     // Normalize provider name
@@ -4917,7 +4922,7 @@ async function handleStream(type, id, config, workerOrigin) {
                     const sizeLine = `💾 ${result.size || 'Unknown'}`;
                     
                     const langInfo = getLanguageInfo(result.title, italianTitle, result.source);
-                    const langDisplay = langInfo.isMulti ? '🌈 MULTI' : (langInfo.isItalian ? '🇮🇹' : '🇬🇧');
+                    const langDisplay = langInfo.displayLabel;
                     const languageLine = `🗣️ ${langDisplay}`;
 
                     // Normalize provider name
@@ -4986,7 +4991,7 @@ async function handleStream(type, id, config, workerOrigin) {
                     const sizeLine = `💾 ${result.size || 'Unknown'}`;
                     
                     const langInfo = getLanguageInfo(result.title, italianTitle, result.source);
-                    const langDisplay = langInfo.isMulti ? '🌈 MULTI' : (langInfo.isItalian ? '🇮🇹' : '🇬🇧');
+                    const langDisplay = langInfo.displayLabel;
                     const languageLine = `🗣️ ${langDisplay}`;
 
                     // Normalize provider name
