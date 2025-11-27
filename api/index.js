@@ -1898,74 +1898,28 @@ function createDebridServices(config) {
     return services;
 }
 
-// ✅ MediaFlow Proxy / EasyProxy Helper - Using /generate_urls endpoint (like AIOStream)
+// ✅ MediaFlow Proxy / EasyProxy Helper - Using direct URL construction (simpler, more reliable)
 async function proxyThroughMediaFlow(directUrl, mediaflowConfig, filename = null) {
     if (!mediaflowConfig || !mediaflowConfig.url) {
         return directUrl; // No proxy configured, return direct URL
     }
     
-    // Extract filename from URL if not provided
-    if (!filename) {
-        const urlParts = directUrl.split('/');
-        filename = urlParts[urlParts.length - 1] || 'stream.mkv';
-        // Remove query params from filename
-        filename = filename.split('?')[0];
-    }
-    
     const mediaflowUrl = mediaflowConfig.url.replace(/\/+$/, '');
-    const generateUrlsEndpoint = `${mediaflowUrl}/generate_urls`;
     const password = mediaflowConfig.password || '';
     
-    // Build request body exactly like AIOStream
-    // If no password, don't include api_password at all (some proxies reject empty string)
-    const requestBody = {
-        mediaflow_proxy_url: mediaflowUrl,
-        urls: [{
-            endpoint: '/proxy/stream',
-            filename: filename,
-            query_params: {},
-            destination_url: directUrl,
-            request_headers: {},
-            response_headers: {}
-        }]
-    };
+    // Method 1: Try direct URL construction first (simpler, no API call needed)
+    // Format: {proxy_url}/proxy/stream?d={encoded_destination_url}&api_password={password}
+    const encodedDestUrl = encodeURIComponent(directUrl);
+    let proxyStreamUrl = `${mediaflowUrl}/proxy/stream?d=${encodedDestUrl}`;
     
-    // Only add api_password if it's not empty
     if (password) {
-        requestBody.api_password = password;
-        requestBody.urls[0].query_params.api_password = password;
+        proxyStreamUrl += `&api_password=${encodeURIComponent(password)}`;
     }
     
-    console.log(`🔀 Calling MediaFlow /generate_urls for: ${filename}${password ? ' (with password)' : ' (no password)'}`);
-    console.log(`🔀 Request URL: ${generateUrlsEndpoint}`);
-    console.log(`🔀 Request body: ${JSON.stringify(requestBody)}`);
+    console.log(`🔀 MediaFlow proxy URL constructed directly${password ? ' (with password)' : ' (no password)'}`);
+    console.log(`🔀 Proxy URL: ${proxyStreamUrl.substring(0, 150)}...`);
     
-    // Call MediaFlow to generate proxy URL
-    const response = await fetch(generateUrlsEndpoint, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(requestBody),
-        signal: AbortSignal.timeout(30000) // Increased timeout to 30s
-    });
-    
-    if (!response.ok) {
-        throw new Error(`MediaFlow returned ${response.status}: ${response.statusText}`);
-    }
-    
-    const data = await response.json();
-    
-    if (data.error) {
-        throw new Error(data.error);
-    }
-    
-    if (data.urls && data.urls.length > 0) {
-        console.log(`✅ MediaFlow proxy URL generated successfully`);
-        return data.urls[0]; // Return the generated MediaFlow proxy URL
-    } else {
-        throw new Error('No URLs returned from MediaFlow');
-    }
+    return proxyStreamUrl;
 }
 
 // ✅ Helper functions (unchanged)
