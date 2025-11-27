@@ -1567,19 +1567,16 @@ class Torbox {
         
         const results = {};
         
-        // Torbox supports bulk check via POST
+        // Torbox supports bulk check via POST - use query params like Torrentio
         try {
-            const response = await fetch(`${this.baseUrl}/torrents/checkcached`, {
+            const response = await fetch(`${this.baseUrl}/torrents/checkcached?format=list&list_files=true`, {
                 method: 'POST',
                 headers: {
                     'Authorization': `Bearer ${this.apiKey}`,
-                    'Content-Type': 'application/json'
+                    'Content-Type': 'application/json',
+                    'User-Agent': 'torrentio'
                 },
-                body: JSON.stringify({
-                    hashes: hashes,
-                    format: 'object',
-                    list_files: true
-                })
+                body: JSON.stringify({ hashes: hashes })
             });
 
             if (!response.ok) {
@@ -1589,17 +1586,20 @@ class Torbox {
             const data = await response.json();
             
             if (data.success && data.data) {
+                // Torrentio uses format=list, so data.data is an array of cached entries
+                const cachedHashes = new Set(
+                    (Array.isArray(data.data) ? data.data : [])
+                        .map(entry => entry.hash?.toLowerCase())
+                        .filter(Boolean)
+                );
+                
                 hashes.forEach(hash => {
-                    const cacheInfo = data.data[hash.toLowerCase()];
+                    const hashLower = hash.toLowerCase();
+                    const isCached = cachedHashes.has(hashLower);
                     
-                    // ✅ TORBOX API LOGIC: If hash is present in response data, it's cached
-                    // Torbox API returns the hash entry ONLY if it's in cache
-                    // If not in cache, the hash won't be in the response
-                    const isCached = !!cacheInfo;  // Present = cached
-                    
-                    results[hash.toLowerCase()] = {
-                        cached: isCached,  // Simple presence check
-                        downloadLink: null,  // Not needed, /torbox-stream handles everything
+                    results[hashLower] = {
+                        cached: isCached,
+                        downloadLink: null,
                         service: 'Torbox'
                     };
                 });
@@ -1624,7 +1624,8 @@ class Torbox {
             method: 'POST',
             headers: {
                 'Authorization': `Bearer ${this.apiKey}`,
-                'Content-Type': 'application/x-www-form-urlencoded'
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'User-Agent': 'torrentio'
             },
             body: data.toString()
         });
@@ -1648,7 +1649,8 @@ class Torbox {
     async getTorrents() {
         const response = await fetch(`${this.baseUrl}/torrents/mylist`, {
             headers: { 
-                'Authorization': `Bearer ${this.apiKey}` 
+                'Authorization': `Bearer ${this.apiKey}`,
+                'User-Agent': 'torrentio'
             }
         });
         
@@ -1669,7 +1671,8 @@ class Torbox {
             method: 'POST',
             headers: {
                 'Authorization': `Bearer ${this.apiKey}`,
-                'Content-Type': 'application/json'
+                'Content-Type': 'application/json',
+                'User-Agent': 'torrentio'
             },
             body: JSON.stringify({
                 torrent_id: torrentId,
@@ -1711,7 +1714,8 @@ class Torbox {
         const response = await fetch(`${this.baseUrl}/torrents/requestdl?${params}`, {
             method: 'GET',
             headers: {
-                'Authorization': `Bearer ${this.apiKey}`
+                'Authorization': `Bearer ${this.apiKey}`,
+                'User-Agent': 'torrentio'
             }
         });
 
@@ -6817,29 +6821,8 @@ export default async function handler(req, res) {
                     console.log(`[Torbox] No existing torrent found: ${error.message}`);
                 }
                 
-                // STEP 1.5: If not found in user torrents, check if it's in GLOBAL cache
-                // This is CRITICAL: if cached, add it instantly without downloading!
-                if (!torrent) {
-                    console.log(`[Torbox] Checking global cache for ${infoHash}`);
-                    try {
-                        const cacheCheck = await torbox.checkCache([infoHash]);
-                        const cacheInfo = cacheCheck[infoHash.toLowerCase()];
-                        
-                        // cacheInfo.cached is now always true if returned by checkCache
-                        if (cacheInfo && cacheInfo.cached) {
-                            console.log(`[Torbox] ⚡ Found in GLOBAL cache! Adding instantly...`);
-                            // Torrent is in global cache, adding will be instant
-                            // Continue to STEP 2 to add it
-                        } else {
-                            console.log(`[Torbox] ⚠️ NOT in cache, will need to download`);
-                            // Not in cache, show downloading placeholder immediately
-                            return res.redirect(302, `${TORRENTIO_VIDEO_BASE}/videos/downloading_v2.mp4`);
-                        }
-                    } catch (cacheError) {
-                        console.log(`[Torbox] Cache check failed: ${cacheError.message}, will try to add anyway`);
-                        // If cache check fails, be optimistic and try to add
-                    }
-                }
+                // STEP 1.5: Like Torrentio, skip cache check and directly try to add
+                // Torrentio doesn't check cache during resolve - it just tries to add
                 
                 // STEP 2: If not found, create new torrent (like Torrentio _createTorrent)
                 if (!torrent) {
