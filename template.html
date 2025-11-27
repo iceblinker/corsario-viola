@@ -574,7 +574,7 @@
                     <div style="grid-column: span 1;">
                         <h4 style="visibility: hidden;">Placeholder</h4>
                         <ul>
-                            <li><strong>Debrid:</strong> Real-Debrid, Torbox e/o AllDebrid per streaming istantaneo</li>
+                            <li><strong>Debrid:</strong> Real-Debrid e/o Torbox per streaming istantaneo</li>
                             <li><strong>MediaFlow Proxy:</strong> Condividi Real-Debrid in sicurezza (opzionale)</li>
                             <li><strong>P2P Fallback:</strong> Senza debrid usa streaming P2P diretto</li>
                         </ul>
@@ -617,19 +617,6 @@
                 <input id="torbox_key" placeholder="Torbox API Key" type="password" disabled>
             </div>
             
-            <div class="service-card">
-                <div class="service-header">
-                    <div class="service-title">
-                        🅰️ AllDebrid (Opzionale)
-                        <a href="https://alldebrid.com/apikeys/" target="_blank" title="Ottieni API Key">
-                            <span class="key-icon">🔑</span>
-                        </a>
-                    </div>
-                    <input type="checkbox" id="use_alldebrid">
-                </div>
-                <input id="alldebrid_key" placeholder="AllDebrid API Key" type="password" disabled>
-            </div>
-            
             <!-- MediaFlow and Jackett Row -->
             <div class="service-card">
                 <div class="service-header">
@@ -654,7 +641,7 @@
             </div>
             
             <!-- Search Sites and Action Section Row -->
-            <div class="service-card">
+            <div class="service-card" style="grid-column: span 2;">
                 <div class="section-title">🔎 Siti di Ricerca Torrent</div>
                 <small>Seleziona su quali siti cercare i torrent:</small>
                 <div class="search-sites">
@@ -717,8 +704,7 @@
         const rdKeyInput = document.getElementById("rd_key");
         const useTorboxCheckbox = document.getElementById("use_torbox");
         const torboxKeyInput = document.getElementById("torbox_key");
-        const useAllDebridCheckbox = document.getElementById("use_alldebrid");
-        const allDebridKeyInput = document.getElementById("alldebrid_key");
+
         const mediaflowUrlInput = document.getElementById("mediaflow_url");
         const mediaflowPasswordInput = document.getElementById("mediaflow_password");
         const jackettUrlInput = document.getElementById("jackett_url");
@@ -752,12 +738,7 @@
             updateInstallLink();
         });
 
-        // Enable/disable AllDebrid input based on checkbox
-        useAllDebridCheckbox.addEventListener('change', () => {
-            allDebridKeyInput.disabled = !useAllDebridCheckbox.checked;
-            if (!useAllDebridCheckbox.checked) allDebridKeyInput.value = '';
-            updateInstallLink();
-        });
+
 
         function updateInstallLink() {
             // TMDB is now hardcoded, no validation needed
@@ -781,15 +762,6 @@
                 if (torboxKey) {
                     config.use_torbox = true;
                     config.torbox_key = torboxKey;
-                }
-            }
-            
-            // AllDebrid
-            if (useAllDebridCheckbox.checked) {
-                const allDebridKey = allDebridKeyInput.value.trim();
-                if (allDebridKey) {
-                    config.use_alldebrid = true;
-                    config.alldebrid_key = allDebridKey;
                 }
             }
             
