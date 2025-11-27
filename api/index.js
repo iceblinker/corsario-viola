@@ -208,16 +208,33 @@ function isSeasonPack(title) {
     if (!title) return false;
     const lowerTitle = title.toLowerCase();
     
+    // First check: if it has S07E01 pattern, it's a single episode, NOT a pack
+    const singleEpisodePattern = /s\d{1,2}e\d{1,2}/i;
+    if (singleEpisodePattern.test(lowerTitle)) {
+        return false;
+    }
+    
     // Pattern per pack completi/multi-stagione
     const packPatterns = [
+        // Multi-season packs
         /stagion[ei]\s*\d+\s*[-–—]\s*\d+/i,  // Stagione 1-34
         /season\s*\d+\s*[-–—]\s*\d+/i,       // Season 1-34
         /s\d+\s*[-–—]\s*s?\d+/i,             // S01-S34
+        
+        // Complete/collection keywords
         /completa/i,                          // Completa
         /complete/i,                          // Complete
         /integrale/i,                         // Integrale
         /collection/i,                        // Collection
-        /\bpack\b/i                          // Pack
+        /\bpack\b/i,                          // Pack
+        
+        // Single season packs (without episode number)
+        /stagion[ei]\s*\d+/i,                 // Stagione 7, Stagioni 1
+        /season\s*\d+/i,                      // Season 7
+        /\.s\d{1,2}\./i,                      // .S7. or .S07. (dots around)
+        /\.s\d{1,2}$/i,                       // .S07 at end of title
+        /\bs\d{1,2}(?!e)\b/i,                 // S7 or S07 not followed by E (word boundary)
+        /\bs\d{1,2}\./i,                      // S7. or S07. (S followed by dot, no episode)
     ];
     
     return packPatterns.some(pattern => pattern.test(lowerTitle));
@@ -4762,7 +4779,13 @@ async function handleStream(type, id, config, workerOrigin) {
                     
                     // ✅ UNIFIED ENDPOINT: Always use /torbox-stream/ with magnet link
                     // The endpoint will handle: global cache, personal cache, or add new torrent
-                    streamUrl = `${workerOrigin}/torbox-stream/${encodedConfig}/${encodeURIComponent(result.magnetLink)}`;
+                    // Include season/episode for series to select correct file from pack
+                    if (type === 'series' && season && episode) {
+                        streamUrl = `${workerOrigin}/torbox-stream/${encodedConfig}/${encodeURIComponent(result.magnetLink)}/${season}/${episode}`;
+                        console.log(`📦 [Torbox] Stream URL with S${season}E${episode}: ${result.title}`);
+                    } else {
+                        streamUrl = `${workerOrigin}/torbox-stream/${encodedConfig}/${encodeURIComponent(result.magnetLink)}`;
+                    }
                     
                     // ✅ EXACT TORRENTIO LOGIC: If Torbox says cached, show as cached
                     if (torboxCacheData?.cached) {
@@ -5698,39 +5721,33 @@ export default async function handler(req, res) {
                             console.log(`  ${i + 1}. ${filename} (${(f.bytes / 1024 / 1024).toFixed(0)}MB)`);
                         });
                         
-                        // Try to find file matching the episode with multiple patterns
+                        // Try to find file matching the episode with STRICT patterns (word boundaries)
                         targetFile = videoFiles.find(file => {
                             const lowerPath = file.path.toLowerCase();
                             const lowerFilename = file.path.split('/').pop().toLowerCase();
                             
-                            // Patterns to match (in order of specificity)
-                            const matches = (
-                                // Standard: S08E02
-                                lowerPath.includes(`s${seasonStr}e${episodeStr}`) ||
-                                // Compact: 8x02 (with leading zero)
-                                lowerPath.includes(`${season}x${episodeStr}`) ||
-                                // Compact: 8x2 (without leading zero)
-                                lowerPath.includes(`${season}x${episode}`) ||
+                            // Use regex with word boundaries to avoid partial matches like e1 matching e11
+                            // S07E01 should NOT match S07E11 or S07E10
+                            const patterns = [
+                                // Standard: S08E02 (with word boundary after episode number)
+                                new RegExp(`s${seasonStr}e${episodeStr}(?![0-9])`, 'i'),
+                                // Compact: 8x02 (with leading zero, word boundary)
+                                new RegExp(`${season}x${episodeStr}(?![0-9])`, 'i'),
+                                // Compact: 8x2 (without leading zero, word boundary)
+                                new RegExp(`${season}x${episode}(?![0-9])`, 'i'),
                                 // Dotted: s08.e02
-                                lowerPath.includes(`s${seasonStr}.e${episodeStr}`) ||
+                                new RegExp(`s${seasonStr}\\.e${episodeStr}(?![0-9])`, 'i'),
                                 // Spaced: Season 8 Episode 2
-                                lowerPath.includes(`season ${season} episode ${episode}`) ||
-                                lowerPath.includes(`season${season}episode${episode}`) ||
+                                new RegExp(`season\\s*${season}\\s*episode\\s*${episode}(?![0-9])`, 'i'),
                                 // Italian: Stagione 8 Episodio 2
-                                lowerPath.includes(`stagione ${season} episodio ${episode}`) ||
-                                lowerPath.includes(`stagione${season}episodio${episode}`) ||
-                                // Episodio: episodio.2
-                                lowerPath.includes(`episodio.${episode}`) ||
-                                lowerPath.includes(`episodio ${episode}`) ||
-                                // Compact numbers: 802 (with word boundaries)
-                                new RegExp(`[^0-9]${season}${episodeStr}[^0-9]`).test(lowerPath) ||
-                                // Alternative formats
-                                lowerPath.includes(`ep${episodeStr}`) && lowerPath.includes(`s${seasonStr}`) ||
-                                lowerPath.includes(`e${episodeStr}`) && lowerPath.includes(`s${seasonStr}`) ||
-                                // Episode without leading zero: ep2, e2
-                                lowerPath.includes(`ep${episode}`) && lowerPath.includes(`s${seasonStr}`) ||
-                                lowerPath.includes(`e${episode}`) && lowerPath.includes(`s${seasonStr}`)
-                            );
+                                new RegExp(`stagione\\s*${season}\\s*episodio\\s*${episode}(?![0-9])`, 'i'),
+                                // Episodio: episodio.2 or episodio 2
+                                new RegExp(`episodio[\\s.]*${episode}(?![0-9])`, 'i'),
+                                // Compact numbers: 802 (surrounded by non-digits)
+                                new RegExp(`[^0-9]${season}${episodeStr}[^0-9]`),
+                            ];
+                            
+                            const matches = patterns.some(pattern => pattern.test(lowerPath));
                             
                             if (matches) {
                                 console.log(`[RealDebrid] ✅ MATCHED: ${file.path}`);
@@ -5848,34 +5865,28 @@ export default async function handler(req, res) {
                             const lowerPath = file.path.toLowerCase();
                             const lowerFilename = file.path.split('/').pop().toLowerCase();
                             
-                            // Patterns to match (in order of specificity)
-                            const matches = (
-                                // Standard: S08E02
-                                lowerPath.includes(`s${seasonStr}e${episodeStr}`) ||
-                                // Compact: 8x02 (with leading zero)
-                                lowerPath.includes(`${season}x${episodeStr}`) ||
-                                // Compact: 8x2 (without leading zero)
-                                lowerPath.includes(`${season}x${episode}`) ||
+                            // Use regex with word boundaries to avoid partial matches like e1 matching e11
+                            // S07E01 should NOT match S07E11 or S07E10
+                            const patterns = [
+                                // Standard: S08E02 (with word boundary after episode number)
+                                new RegExp(`s${seasonStr}e${episodeStr}(?![0-9])`, 'i'),
+                                // Compact: 8x02 (with leading zero, word boundary)
+                                new RegExp(`${season}x${episodeStr}(?![0-9])`, 'i'),
+                                // Compact: 8x2 (without leading zero, word boundary)
+                                new RegExp(`${season}x${episode}(?![0-9])`, 'i'),
                                 // Dotted: s08.e02
-                                lowerPath.includes(`s${seasonStr}.e${episodeStr}`) ||
+                                new RegExp(`s${seasonStr}\\.e${episodeStr}(?![0-9])`, 'i'),
                                 // Spaced: Season 8 Episode 2
-                                lowerPath.includes(`season ${season} episode ${episode}`) ||
-                                lowerPath.includes(`season${season}episode${episode}`) ||
+                                new RegExp(`season\\s*${season}\\s*episode\\s*${episode}(?![0-9])`, 'i'),
                                 // Italian: Stagione 8 Episodio 2
-                                lowerPath.includes(`stagione ${season} episodio ${episode}`) ||
-                                lowerPath.includes(`stagione${season}episodio${episode}`) ||
-                                // Episodio: episodio.2
-                                lowerPath.includes(`episodio.${episode}`) ||
-                                lowerPath.includes(`episodio ${episode}`) ||
-                                // Compact numbers: 802 (with word boundaries)
-                                new RegExp(`[^0-9]${season}${episodeStr}[^0-9]`).test(lowerPath) ||
-                                // Alternative formats
-                                lowerPath.includes(`ep${episodeStr}`) && lowerPath.includes(`s${seasonStr}`) ||
-                                lowerPath.includes(`e${episodeStr}`) && lowerPath.includes(`s${seasonStr}`) ||
-                                // Episode without leading zero: ep2, e2
-                                lowerPath.includes(`ep${episode}`) && lowerPath.includes(`s${seasonStr}`) ||
-                                lowerPath.includes(`e${episode}`) && lowerPath.includes(`s${seasonStr}`)
-                            );
+                                new RegExp(`stagione\\s*${season}\\s*episodio\\s*${episode}(?![0-9])`, 'i'),
+                                // Episodio: episodio.2 or episodio 2
+                                new RegExp(`episodio[\\s.]*${episode}(?![0-9])`, 'i'),
+                                // Compact numbers: 802 (surrounded by non-digits)
+                                new RegExp(`[^0-9]${season}${episodeStr}[^0-9]`),
+                            ];
+                            
+                            const matches = patterns.some(pattern => pattern.test(lowerPath));
                             
                             if (matches) {
                                 console.log(`[RealDebrid] ✅ MATCHED: ${file.path}`);
@@ -6780,6 +6791,8 @@ export default async function handler(req, res) {
             const pathParts = url.pathname.split('/');
             const encodedConfigStr = pathParts[2];
             const encodedMagnet = pathParts[3];
+            const seasonParam = pathParts[4]; // Optional: season number for series
+            const episodeParam = pathParts[5]; // Optional: episode number for series
             const workerOrigin = url.origin; // For placeholder video URLs
             
             const htmlResponse = (title, message, isError = false) => `
@@ -6852,7 +6865,7 @@ export default async function handler(req, res) {
                     }
                 };
                 
-                // _unrestrictLink (EXACT Torrentio logic)
+                // _unrestrictLink (with episode pattern matching for packs)
                 const _unrestrictLink = async (torrent) => {
                     const videoExtensions = ['.mkv', '.mp4', '.avi', '.mov', '.wmv', '.flv', '.webm'];
                     const videos = (torrent.files || [])
@@ -6862,7 +6875,56 @@ export default async function handler(req, res) {
                         })
                         .sort((a, b) => b.size - a.size);
                     
-                    const targetVideo = videos[0];
+                    let targetVideo;
+                    
+                    // If season/episode is provided, use pattern matching to find correct file
+                    if (seasonParam && episodeParam) {
+                        const season = parseInt(seasonParam, 10);
+                        const episode = parseInt(episodeParam, 10);
+                        const seasonStr = String(season).padStart(2, '0');
+                        const episodeStr = String(episode).padStart(2, '0');
+                        
+                        console.log(`[Torbox] 🔍 Looking for S${seasonStr}E${episodeStr} in pack (${videos.length} video files)`);
+                        
+                        // Log all video files
+                        videos.forEach((f, i) => {
+                            const name = f.short_name || f.name || 'unknown';
+                            console.log(`  ${i + 1}. ${name} (${(f.size / 1024 / 1024).toFixed(0)}MB)`);
+                        });
+                        
+                        // Use regex with word boundaries to avoid partial matches (e1 matching e11)
+                        const patterns = [
+                            new RegExp(`s${seasonStr}e${episodeStr}(?![0-9])`, 'i'),
+                            new RegExp(`${season}x${episodeStr}(?![0-9])`, 'i'),
+                            new RegExp(`${season}x${episode}(?![0-9])`, 'i'),
+                            new RegExp(`s${seasonStr}\\.e${episodeStr}(?![0-9])`, 'i'),
+                            new RegExp(`season\\s*${season}\\s*episode\\s*${episode}(?![0-9])`, 'i'),
+                            new RegExp(`stagione\\s*${season}\\s*episodio\\s*${episode}(?![0-9])`, 'i'),
+                            new RegExp(`episodio[\\s.]*${episode}(?![0-9])`, 'i'),
+                            new RegExp(`[^0-9]${season}${episodeStr}[^0-9]`),
+                        ];
+                        
+                        targetVideo = videos.find(file => {
+                            const fileName = file.short_name?.toLowerCase() || file.name?.toLowerCase() || '';
+                            const matches = patterns.some(pattern => pattern.test(fileName));
+                            if (matches) {
+                                console.log(`[Torbox] ✅ MATCHED: ${file.short_name || file.name}`);
+                            }
+                            return matches;
+                        });
+                        
+                        if (targetVideo) {
+                            console.log(`[Torbox] ✅ Selected episode file: ${targetVideo.short_name || targetVideo.name}`);
+                        } else {
+                            console.log(`[Torbox] ❌ NO MATCH - Pattern matching failed for S${seasonStr}E${episodeStr}`);
+                            console.log(`[Torbox] ⚠️ Falling back to largest video file`);
+                        }
+                    }
+                    
+                    // Fallback: use largest video file
+                    if (!targetVideo) {
+                        targetVideo = videos[0];
+                    }
                     
                     if (!targetVideo) {
                         if (torrent.files?.every(file => file.zipped)) {
@@ -6871,6 +6933,7 @@ export default async function handler(req, res) {
                         throw new Error(`No TorBox file found in: ${JSON.stringify(torrent.files)}`);
                     }
                     
+                    console.log(`[Torbox] Selected file: ${targetVideo.short_name || targetVideo.name} (id=${targetVideo.id})`);
                     return await torbox.createDownload(torrent.id, targetVideo.id);
                 };
                 
