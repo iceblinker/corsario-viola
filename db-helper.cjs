@@ -466,10 +466,15 @@ async function updateTorrentFileInfo(infoHash, fileIndex, filePath, episodeInfo 
           return false;
         }
         
-        // Insert new file
+        // Insert new file (UPSERT - update if exists)
         const insertQuery = `
           INSERT INTO files (info_hash, file_index, title, imdb_id, imdb_season, imdb_episode)
           VALUES ($1, $2, $3, $4, $5, $6)
+          ON CONFLICT (info_hash, file_index) DO UPDATE SET
+            title = EXCLUDED.title,
+            imdb_id = EXCLUDED.imdb_id,
+            imdb_season = EXCLUDED.imdb_season,
+            imdb_episode = EXCLUDED.imdb_episode
         `;
         const res = await pool.query(insertQuery, [
           infoHash.toLowerCase(),
@@ -479,8 +484,9 @@ async function updateTorrentFileInfo(infoHash, fileIndex, filePath, episodeInfo 
           episodeInfo.season,
           episodeInfo.episode
         ]);
-        console.log(`✅ [DB] Inserted file into 'files' table: ${fileName} (rowCount=${res.rowCount})`);
-        return res.rowCount > 0;
+        
+        console.log(`✅ [DB] Upserted file into 'files' table: ${fileName}`);
+        return true;
       }
     } else {
       // Fallback: update torrents table (for movies or when episode info not available)
