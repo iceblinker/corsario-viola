@@ -1315,16 +1315,16 @@ class RealDebrid {
         const results = {};
         const batchSize = 40; // RD API limit: max 40 hashes per request
         
-        console.log(`🔵 RD Cache check: ${hashes.length} hashes (${Math.ceil(hashes.length / batchSize)} batches)`);
+        console.log(`👑 RD Cache check: ${hashes.length} hashes (${Math.ceil(hashes.length / batchSize)} batches)`);
         
         for (let i = 0; i < hashes.length; i += batchSize) {
             const batch = hashes.slice(i, i + batchSize);
             const url = `${this.baseUrl}/torrents/instantAvailability/${batch.join('/')}`;
 
             try {
-                console.log(`🔵 [RD Debug] Request URL: ${url}`);
-                console.log(`🔵 [RD Debug] API Key length: ${this.apiKey.length}`);
-                console.log(`🔵 [RD Debug] Batch hashes: ${batch.join(', ')}`);
+                console.log(`👑 [RD Debug] Request URL: ${url}`);
+                console.log(`👑 [RD Debug] API Key length: ${this.apiKey.length}`);
+                console.log(`👑 [RD Debug] Batch hashes: ${batch.join(', ')}`);
                 
                 const response = await fetch(url, {
                     method: 'GET',
@@ -1396,7 +1396,7 @@ class RealDebrid {
         }
 
         const cachedCount = Object.values(results).filter(r => r.cached).length;
-        console.log(`🔵 RD Cache check complete: ${cachedCount}/${hashes.length} cached`);
+        console.log(`👑 RD Cache check complete: ${cachedCount}/${hashes.length} cached`);
 
         return results;
     }
@@ -1862,7 +1862,7 @@ function createDebridServices(config) {
     
     // Check RealDebrid
     if (config.use_rd && config.rd_key && config.rd_key.length > 5) {
-        console.log('🔵 Real-Debrid enabled');
+        console.log('👑 Real-Debrid enabled');
         services.realdebrid = new RealDebrid(config.rd_key);
         services.useRealDebrid = true;
     }
@@ -4518,7 +4518,7 @@ async function handleStream(type, id, config, workerOrigin) {
         const cacheChecks = [];
         
         if (useRealDebrid) {
-            console.log('🔵 Checking Real-Debrid cache...');
+            console.log('👑 Checking Real-Debrid cache...');
             cacheChecks.push(
                 (async () => {
                     // ⚠️ instantAvailability is DISABLED by RealDebrid (error_code 37)
@@ -4651,10 +4651,10 @@ async function handleStream(type, id, config, workerOrigin) {
                     // 3. No cache available
                     if (rdCacheData?.cached) {
                         cacheType = 'global';
-                        console.log(`🔵 ⚡ RD GLOBAL cache (DB): ${result.title}`);
+                        console.log(`👑 ⚡ RD GLOBAL cache (DB): ${result.title}`);
                     } else if (rdUserTorrent && rdUserTorrent.status === 'downloaded') {
                         cacheType = 'personal';
-                        console.log(`🔵 👤 Found in RD PERSONAL cache: ${result.title}`);
+                        console.log(`👑 👤 Found in RD PERSONAL cache: ${result.title}`);
                     } else {
                         cacheType = 'none';
                     }
@@ -4663,8 +4663,8 @@ async function handleStream(type, id, config, workerOrigin) {
                     const cacheStatusIcon = isCached ? '⚡' : '⏬';
                     const errorIcon = streamError ? '⚠️ ' : '';
                     
-                    // New Name Format: IL 🏴‍☠️ 🔮 [🔵] [⚡] \n [Quality]
-                    const streamName = `IL 🏴‍☠️ 🔮 [🔵] [${cacheStatusIcon}]${errorIcon}\n${result.quality || 'Unknown'}`;
+                    // New Name Format: IL 🏴‍☠️ 🔮 [👑] [⚡] \n [Quality]
+                    const streamName = `IL 🏴‍☠️ 🔮 [👑] [${cacheStatusIcon}]${errorIcon}\n${result.quality || 'Unknown'}`;
                     
                     const debugInfo = streamError ? `\n⚠️ Stream error: ${streamError}` : '';
                     
@@ -6172,7 +6172,7 @@ export default async function handler(req, res) {
                 return res.redirect(302, `${TORRENTIO_VIDEO_BASE}/videos/download_failed_v2.mp4`);
 
             } catch (error) {
-                console.error('🔵 ❌ RD stream error:', error);
+                console.error('👑 ❌ RD stream error:', error);
                 
                 // 🔥 Torrentio-style: Check for specific error codes
                 const realdebrid = new RealDebrid(userConfig.rd_key || '');
