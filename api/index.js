@@ -1646,8 +1646,14 @@ class Torbox {
         return responseData.data;
     }
 
-    async getTorrents() {
-        const response = await fetch(`${this.baseUrl}/torrents/mylist`, {
+    async getTorrents(torrentId = null) {
+        // Use bypass_cache like Torrentio does
+        const params = new URLSearchParams({ bypass_cache: 'true' });
+        if (torrentId) {
+            params.append('id', torrentId);
+        }
+        
+        const response = await fetch(`${this.baseUrl}/torrents/mylist?${params}`, {
             headers: { 
                 'Authorization': `Bearer ${this.apiKey}`,
                 'User-Agent': 'torrentio'
@@ -6833,14 +6839,18 @@ export default async function handler(req, res) {
                         
                         // Handle different response types from Torbox (like Torrentio does)
                         if (addResponse.torrent_id) {
-                            // Torrent created, try to get info
+                            // Torrent created - like Torrentio, immediately get fresh info with bypass_cache
                             const torrentId = addResponse.torrent_id;
-                            await new Promise(resolve => setTimeout(resolve, 2000));
+                            console.log(`[Torbox] Torrent created with ID: ${torrentId}, fetching fresh info...`);
                             
-                            try {
-                                torrent = await torbox.getTorrentInfo(torrentId);
-                            } catch (getTorrentError) {
-                                // Torrent not yet in list, show downloading placeholder
+                            // Get fresh torrent info with bypass_cache (exactly like Torrentio)
+                            const freshTorrents = await torbox.getTorrents(torrentId);
+                            torrent = Array.isArray(freshTorrents) 
+                                ? freshTorrents.find(t => t.id === torrentId)
+                                : freshTorrents; // Single torrent returned when ID is specified
+                            
+                            if (!torrent) {
+                                // Torrent not yet ready, show downloading
                                 console.log(`[Torbox] Torrent ${torrentId} not yet in list, showing downloading...`);
                                 return res.redirect(302, `${TORRENTIO_VIDEO_BASE}/videos/downloading_v2.mp4`);
                             }
@@ -6874,9 +6884,14 @@ export default async function handler(req, res) {
                 }
                 
                 // STEP 3: Check torrent status (EXACT Torrentio logic)
+                // Log detailed state for debugging
+                console.log(`[Torbox] Torrent state: download_present=${torrent?.download_present}, active=${torrent?.active}, download_finished=${torrent?.download_finished}, download_state=${torrent?.download_state}, queued_id=${torrent?.queued_id}`);
+                
                 const statusReady = torrent?.download_present;
                 const statusError = (!torrent?.active && !torrent?.download_finished) || torrent?.download_state === 'error';
                 const statusDownloading = (!statusReady && !statusError) || !!torrent?.queued_id;
+                
+                console.log(`[Torbox] Status check: ready=${statusReady}, error=${statusError}, downloading=${statusDownloading}`);
                 
                 if (statusReady) {
                     // ✅ READY: Unrestrict and stream
