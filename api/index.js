@@ -4457,10 +4457,157 @@ async function handleStream(type, id, config, workerOrigin) {
             console.log(`💾 [DB] Total raw results after DB merge: ${allRawResults.length}`);
         }
 
+        // 🎯 Helper function to check if a title matches the requested episode
+        // Returns true if: season pack complete, exact episode, or range that includes the episode
+        const matchesRequestedEpisode = (title, requestedSeason, requestedEpisode) => {
+            if (!title || !requestedSeason || !requestedEpisode) return true; // No filter for movies
+            
+            const seasonNum = parseInt(requestedSeason);
+            const episodeNum = parseInt(requestedEpisode);
+            const titleLower = title.toLowerCase();
+            
+            // 1. Check if it's a COMPLETE SEASON PACK (no specific episodes)
+            // Patterns: "S01" alone, "Stagione 1", "Season 1", "[COMPLETA]", "Complete"
+            const seasonOnlyPatterns = [
+                // S01 or S1 NOT followed by E (episode indicator)
+                new RegExp(`[Ss](0?${seasonNum})(?![0-9])(?![Ee])(?!\\s*[Ee])`, 'i'),
+                // "Stagione X" or "Season X" not followed by episode
+                new RegExp(`(stagione|season)\\s*${seasonNum}(?!\\s*e|\\s*ep)`, 'i'),
+            ];
+            
+            const isCompletePack = /\[COMPLETA\]|Complete\s*Series|Complete\s*Season|Serie\s*Completa|Stagione\s*Completa/i.test(title);
+            
+            // Check for season pack (S01 without episode)
+            const hasSeasonOnly = seasonOnlyPatterns.some(pattern => {
+                if (pattern.test(title)) {
+                    // Make sure there's no episode pattern after
+                    const hasEpisode = /[Ss]\d+[Ee]\d+|[Ss]\d+\s*[Ee]\d+|\d+x\d+/i.test(title);
+                    const hasEpisodeRange = /[Ee](p)?\.?\s*\d+\s*[-–]\s*(E(p)?\.?\s*)?\d+/i.test(title);
+                    return !hasEpisode && !hasEpisodeRange;
+                }
+                return false;
+            });
+            
+            if (isCompletePack || hasSeasonOnly) {
+                // Verify it's the right season
+                const seasonMatch = title.match(/[Ss](0?\d+)|[Ss]tagione?\s*(\d+)|[Ss]eason\s*(\d+)/i);
+                if (seasonMatch) {
+                    const foundSeason = parseInt(seasonMatch[1] || seasonMatch[2] || seasonMatch[3]);
+                    if (foundSeason === seasonNum) {
+                        console.log(`✅ [EPISODE FILTER] Season pack detected: "${title.substring(0, 60)}..."`);
+                        return true;
+                    }
+                }
+                // Complete series pack
+                if (/\[COMPLETA\]|Complete\s*Series|Serie\s*Completa/i.test(title)) {
+                    console.log(`✅ [EPISODE FILTER] Complete series pack: "${title.substring(0, 60)}..."`);
+                    return true;
+                }
+            }
+            
+            // 2. Check for EXACT EPISODE match
+            const exactPatterns = [
+                new RegExp(`[Ss](0?${seasonNum})[Ee](0?${episodeNum})(?![0-9])`, 'i'),  // S01E06
+                new RegExp(`${seasonNum}x(0?${episodeNum})(?![0-9])`, 'i'),              // 1x06
+                new RegExp(`[Ss](0?${seasonNum})\\s*[Ee](0?${episodeNum})(?![0-9])`, 'i'), // S01 E06
+            ];
+            
+            if (exactPatterns.some(p => p.test(title))) {
+                console.log(`✅ [EPISODE FILTER] Exact episode match: "${title.substring(0, 60)}..."`);
+                return true;
+            }
+            
+            // 3. Check for EPISODE RANGE that includes the requested episode
+            // Patterns: S01E01-E10, S01E01-10, E01-E10, S01E01.E02.E03
+            const rangePatterns = [
+                // S01E01-E10 or S01E01-10
+                /[Ss](0?\d+)[Ee](0?\d+)[-–](E)?(0?\d+)/i,
+                // E01-E10 or E01-10 (without season, assume current)
+                /[Ee](0?\d+)[-–](E)?(0?\d+)/i,
+                // 1x01-1x10 or 1x01-10
+                /(\d+)x(0?\d+)[-–](\d+x)?(0?\d+)/i,
+            ];
+            
+            for (const pattern of rangePatterns) {
+                const match = title.match(pattern);
+                if (match) {
+                    let startEp, endEp, matchedSeason;
+                    
+                    if (pattern.source.includes('[Ss]')) {
+                        // S01E01-E10 format
+                        matchedSeason = parseInt(match[1]);
+                        startEp = parseInt(match[2]);
+                        endEp = parseInt(match[4] || match[3]);
+                    } else if (pattern.source.includes('x')) {
+                        // 1x01-10 format
+                        matchedSeason = parseInt(match[1]);
+                        startEp = parseInt(match[2]);
+                        endEp = parseInt(match[4]);
+                    } else {
+                        // E01-E10 format (no season in pattern, check separately)
+                        const seasonCheck = title.match(/[Ss](0?\d+)/i);
+                        matchedSeason = seasonCheck ? parseInt(seasonCheck[1]) : seasonNum;
+                        startEp = parseInt(match[1]);
+                        endEp = parseInt(match[3] || match[2]);
+                    }
+                    
+                    if (matchedSeason === seasonNum && episodeNum >= startEp && episodeNum <= endEp) {
+                        console.log(`✅ [EPISODE FILTER] Episode range ${startEp}-${endEp} includes E${episodeNum}: "${title.substring(0, 60)}..."`);
+                        return true;
+                    } else if (matchedSeason === seasonNum) {
+                        console.log(`❌ [EPISODE FILTER] Episode range ${startEp}-${endEp} does NOT include E${episodeNum}: "${title.substring(0, 60)}..."`);
+                        return false;
+                    }
+                }
+            }
+            
+            // 4. Check for MULTI-EPISODE list (S01E01.E02.E03 or S01 E01 E02 E03)
+            const multiEpMatch = title.match(/[Ss](0?\d+)[.\s]*([Ee]\d+[.\s]*)+/i);
+            if (multiEpMatch) {
+                const matchedSeason = parseInt(multiEpMatch[1]);
+                if (matchedSeason === seasonNum) {
+                    // Extract all episode numbers
+                    const episodes = title.match(/[Ee](0?\d+)/gi);
+                    if (episodes) {
+                        const epNumbers = episodes.map(e => parseInt(e.replace(/[Ee]/i, '')));
+                        if (epNumbers.includes(episodeNum)) {
+                            console.log(`✅ [EPISODE FILTER] Multi-episode list includes E${episodeNum}: "${title.substring(0, 60)}..."`);
+                            return true;
+                        } else {
+                            console.log(`❌ [EPISODE FILTER] Multi-episode list [${epNumbers.join(',')}] does NOT include E${episodeNum}: "${title.substring(0, 60)}..."`);
+                            return false;
+                        }
+                    }
+                }
+            }
+            
+            // 5. If we found a specific episode that doesn't match, reject it
+            const singleEpMatch = title.match(/[Ss](0?\d+)[Ee](0?\d+)/i);
+            if (singleEpMatch) {
+                const matchedSeason = parseInt(singleEpMatch[1]);
+                const matchedEpisode = parseInt(singleEpMatch[2]);
+                if (matchedSeason === seasonNum && matchedEpisode !== episodeNum) {
+                    console.log(`❌ [EPISODE FILTER] Single episode S${matchedSeason}E${matchedEpisode} != requested E${episodeNum}: "${title.substring(0, 60)}..."`);
+                    return false;
+                }
+            }
+            
+            // 6. Default: accept (might be a movie or unrecognized format)
+            return true;
+        };
+
         // Smart Deduplication
         const bestResults = new Map();
         for (const result of allRawResults) {
             if (!result.infoHash) continue;
+            
+            // 🎯 EPISODE FILTER: For series, filter out results that don't match the requested episode
+            if (type === 'series' && season && episode) {
+                if (!matchesRequestedEpisode(result.title, season, episode)) {
+                    continue; // Skip this result
+                }
+            }
+            
             const hash = result.infoHash;
             const newLangInfo = getLanguageInfo(result.title, italianTitle, result.source);
 
