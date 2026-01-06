@@ -1,0 +1,13 @@
+version: '3.8'
+
+services:
+  corsario-viola:
+    build: .
+    ports:
+      - "3000:3000"
+    env_file:
+      - .env
+    restart: unless-stopped
+    volumes:
+      # Persist error logs if needed, or remove if not necessary
+      - ./error.log:/app/error.log
