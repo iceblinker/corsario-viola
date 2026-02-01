@@ -11,3 +11,12 @@ services:
     volumes:
       # Persist error logs if needed, or remove if not necessary
       - ./error.log:/app/error.log
+    networks:
+      - caddy_net
+      - ai_network
+
+networks:
+  caddy_net:
+    external: true
+  ai_network:
+    external: true
